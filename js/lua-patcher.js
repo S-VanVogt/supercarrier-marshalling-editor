@@ -135,8 +135,9 @@ export function parseTakeoffRoutes(luaText) {
     const rwMatch = before.match(/RunwayIdx\s*=\s*(\d+)/);
     const runwayIdx = rwMatch ? parseInt(rwMatch[1]) : 1;
 
-    // Extract the inner content of the Points block
-    const inner = luaText.slice(blocks[i].pointsStart, blocks[i].pointsEnd);
+    // Extract the inner content of the Points block, stripping commented-out lines
+    const rawInner = luaText.slice(blocks[i].pointsStart, blocks[i].pointsEnd);
+    const inner = rawInner.replace(/^[ \t]*--.*$/gm, '');
 
     // Parse each point line: {{ x, y_height, z }, V_target [, terminal_size] }
     const points = [];

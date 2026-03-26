@@ -36,3 +36,9 @@ export const LIVERY_COLOURS = {
   yellow: { fill: '#EAB308', stroke: '#A16207', text: '#713F12' },
   brown:  { fill: '#A0522D', stroke: '#6B3A1F', text: '#3E1F0D' },
 };
+
+/** Replace CREW_MEMBERS contents in-place (keeps all references valid). */
+export function replaceCrewMembers(newMembers) {
+  CREW_MEMBERS.length = 0;
+  CREW_MEMBERS.push(...newMembers);
+}

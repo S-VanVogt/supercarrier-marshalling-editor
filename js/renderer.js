@@ -567,7 +567,6 @@ export class Renderer {
     const anyLandingVisible = rs.landingVisible && rs.landingRouteVisible && rs.landingRouteVisible.some(Boolean);
     const editingLanding = rs.selectedRouteType === 'landing' && rs.selectedRoute >= 0;
     const landingActive = anyLandingVisible || editingLanding;
-    if (!editingTakeoff && !anyTakeoffVisible && !landingActive) return;
 
     // Color mode: use member livery colors when landing is active
     const useColor = landingActive;

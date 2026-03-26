@@ -6,6 +6,10 @@ import { polylinePoint } from './polyline.js';
 import { CATAPULT_COLORS, LANDING_COLOR } from './route-data.js';
 import { CREW_MEMBERS, LIVERY_COLOURS } from './crew-data.js';
 import { downloadPatchedLua, parseTakeoffRoutes } from './lua-patcher.js';
+import { parseCrewLua } from './crew-lua-parser.js';
+import { replaceCrewMembers } from './crew-data.js';
+import { replaceCrewRoutes } from './crew-routes-data.js';
+import { replaceTaskData } from './takeoff-tasks-data.js';
 
 export class UI {
   /** @param {import('./viewport.js').Viewport} viewport  @param {import('./renderer.js').Renderer} renderer  @param {import('./route-state.js').RouteState} routeState */
@@ -89,6 +93,25 @@ export class UI {
       input.click();
     });
 
+    // Import crew.lua
+    document.getElementById('btn-import-crew').addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.lua';
+      input.addEventListener('change', () => {
+        const file = input.files[0];
+        if (!file) return;
+        file.text().then(text => {
+          try {
+            this._importCrewLua(text);
+          } catch (err) {
+            alert('Failed to parse crew.lua: ' + err.message);
+          }
+        });
+      });
+      input.click();
+    });
+
     // Export Lua
     document.getElementById('btn-export-lua').addEventListener('click', () => {
       if (!this._originalLuaText) { alert('Lua file not loaded yet.'); return; }
@@ -134,7 +157,12 @@ export class UI {
     this._buildLandingRows(lList);
 
     // Crew member rows
+    this._rebuildCrewList();
+  }
+
+  _rebuildCrewList() {
     const cList = document.getElementById('crew-list');
+    cList.innerHTML = '';
     for (let i = 0; i < CREW_MEMBERS.length; i++) {
       const m = CREW_MEMBERS[i];
       const pal = LIVERY_COLOURS[m.livery] || LIVERY_COLOURS.yellow;
@@ -226,6 +254,30 @@ export class UI {
       });
       list.appendChild(row);
     }
+  }
+
+  _importCrewLua(text) {
+    const data = parseCrewLua(text);
+
+    // Replace members data in-place
+    replaceCrewMembers(data.members);
+
+    // Replace routes data in-place
+    replaceCrewRoutes(data.routes, data.takeoffTasks);
+
+    // Replace task data in-place
+    replaceTaskData(data.takeoffTasks, data.parkingTasks);
+
+    // Update crew visibility array to match new member count
+    this.rs.crewVisible = new Array(data.members.length).fill(true);
+
+    // Rebuild crew panel
+    this._rebuildCrewList();
+
+    // Trigger redraw
+    this.rs._notify();
+
+    console.log(`Imported crew.lua: ${data.members.length} members, ${data.routes.length} routes, ${data.takeoffTasks.length} takeoff tasks, ${data.parkingTasks.length} parking tasks`);
   }
 
   _rebuildRouteList() {
