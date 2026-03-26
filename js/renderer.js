@@ -5,7 +5,9 @@
 import { getDeck } from './polygon-data.js';
 import { polylinePoint } from './polyline.js';
 import { CREW_MEMBERS, LIVERY_COLOURS } from './crew-data.js';
-import { CATAPULT_COLORS } from './route-data.js';
+import { CREW_ROUTES, CREW_ACTIVE_LINKS } from './crew-routes-data.js';
+import { CATAPULT_COLORS, LANDING_COLOR } from './route-data.js';
+import { TAKEOFF_TASKS, PARKING_TASKS, TAKEOFF_USED_ROUTE_IDS, NON_TAKEOFF_LINKS } from './takeoff-tasks-data.js';
 
 export class Renderer {
   /** @param {HTMLCanvasElement} canvas  @param {import('./viewport.js').Viewport} viewport */
@@ -108,10 +110,10 @@ export class Renderer {
   // ── Catapult rectangles ──────────────────────────────────────────────────
   // Each: center (x,y), azimuth in degrees, length, width
   static CATAPULTS = [
-    { name: 'Cat 1', cx:  59.954,  cy:  18.020, azDeg: 354.3,   len: 107.8, wid: 5.0 },
-    { name: 'Cat 2', cx:  58.800,  cy:  -3.752, azDeg: 358.0,   len: 108.8, wid: 5.0 },
-    { name: 'Cat 3', cx: -37.374,  cy: -20.162, azDeg: 355.002, len: 112.0, wid: 5.0 },
-    { name: 'Cat 4', cx: -56.176,  cy: -32.900, azDeg: 359.957, len: 130.0, wid: 5.0 },
+    { name: 'Cat 1', cx:  59.954,  cy:  18.020, azDeg: 354.3,   len: 107.8, wid: 2.0 },
+    { name: 'Cat 2', cx:  58.800,  cy:  -3.752, azDeg: 358.0,   len: 108.8, wid: 2.0 },
+    { name: 'Cat 3', cx: -37.374,  cy: -20.162, azDeg: 355.002, len: 112.0, wid: 2.0 },
+    { name: 'Cat 4', cx: -56.176,  cy: -32.900, azDeg: 359.957, len: 108.0, wid: 2.0 },
   ];
 
   /** Compute 4 world-space corners of an oriented rectangle. */
@@ -282,7 +284,7 @@ export class Renderer {
       if (pts.length < 2) continue;
 
       const color = CATAPULT_COLORS[route.runwayIdx] || '#888';
-      const selected = rs.selectedRoute === i;
+      const selected = rs.selectedRouteType === 'takeoff' && rs.selectedRoute === i;
 
       // polyline
       ctx.beginPath();
@@ -368,71 +370,441 @@ export class Renderer {
     ctx.restore();
   }
 
-  // ── Polyline + t-marker ───────────────────────────────────────────────────
-  drawPolyline(points, t) {
-    const { ctx, W, H } = this;
+  // ── Landing taxi routes ────────────────────────────────────────────────────
+  drawLandingRoutes(rs, t) {
+    if (!rs || !rs.landingVisible) return;
+    const { ctx } = this;
+    ctx.save();
 
-    if (points.length === 0) return;
+    for (let i = 0; i < rs.landingRoutes.length; i++) {
+      if (!rs.isLandingRouteVisible(i)) continue;
+      const route = rs.landingRoutes[i];
+      const pts = route.points;
+      if (pts.length < 2) continue;
 
-    // Draw single point
-    if (points.length === 1) {
-      const c = this.wc(points[0].x, points[0].y);
-      ctx.beginPath(); ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = '#534AB7'; ctx.fill();
-      return;
+      const color = LANDING_COLOR;
+      const selected = rs.selectedRouteType === 'landing' && rs.selectedRoute === i;
+
+      // polyline
+      ctx.beginPath();
+      const p0 = this.wc(pts[0].x, pts[0].y);
+      ctx.moveTo(p0.x, p0.y);
+      for (let j = 1; j < pts.length; j++) {
+        const p = this.wc(pts[j].x, pts[j].y);
+        ctx.lineTo(p.x, p.y);
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = selected ? 2.5 : 1.5;
+      ctx.setLineDash(selected ? [] : [6, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // waypoint markers (circles for landing to distinguish from takeoff squares)
+      const sz = selected ? 5 : 3;
+      for (let j = 0; j < pts.length; j++) {
+        const p = this.wc(pts[j].x, pts[j].y);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, sz, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        if (selected) {
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+
+      // t-marker on selected route
+      if (selected && t != null) {
+        const rpt = polylinePoint(pts, t);
+        if (rpt) {
+          // highlight active segment
+          const segA = this.wc(pts[rpt.segIndex].x, pts[rpt.segIndex].y);
+          const segB = this.wc(pts[rpt.segIndex + 1].x, pts[rpt.segIndex + 1].y);
+          ctx.beginPath();
+          ctx.moveTo(segA.x, segA.y);
+          ctx.lineTo(segB.x, segB.y);
+          ctx.strokeStyle = '#EF9F27';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+
+          // marker dot
+          const cp = this.wc(rpt.x, rpt.y);
+          ctx.beginPath(); ctx.arc(cp.x, cp.y, 9, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(239,159,39,0.2)'; ctx.fill();
+          ctx.beginPath(); ctx.arc(cp.x, cp.y, 6, 0, Math.PI * 2);
+          ctx.fillStyle = '#EF9F27'; ctx.fill();
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+        }
+      }
+
+      // route number label offset from last point
+      const lastPt = pts[pts.length - 1];
+      const prevPt = pts[pts.length - 2];
+      const p0c = this.wc(lastPt.x, lastPt.y);
+      const p1c = this.wc(prevPt.x, prevPt.y);
+      const dx = p0c.x - p1c.x, dy = p0c.y - p1c.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = -dy / len, ny = dx / len;
+      const off = 10;
+      ctx.font = 'bold 9px monospace';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(route.id, p0c.x + nx * off, p0c.y + ny * off);
     }
 
-    // Line segments
+    ctx.restore();
+  }
+
+  // ── Crew active (marshalling) positions ────────────────────────────────────
+  _drawActivePoint(ctx, cx, cy, angle, pal, r) {
+    // Dot
     ctx.beginPath();
-    const c0 = this.wc(points[0].x, points[0].y);
-    ctx.moveTo(c0.x, c0.y);
-    for (let i = 1; i < points.length; i++) {
-      const c = this.wc(points[i].x, points[i].y);
-      ctx.lineTo(c.x, c.y);
-    }
-    ctx.strokeStyle = 'rgba(128,128,128,0.5)';
-    ctx.lineWidth = 2;
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = pal.fill;
+    ctx.globalAlpha = 0.6;
+    ctx.fill();
+    ctx.strokeStyle = pal.stroke;
+    ctx.lineWidth = 1;
     ctx.stroke();
+    ctx.globalAlpha = 1.0;
 
-    // Vertex dots
-    for (const p of points) {
-      const c = this.wc(p.x, p.y);
-      ctx.beginPath(); ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = '#534AB7'; ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+    // Heading arrow
+    const arrowLen = 10;
+    const ax = cx + Math.cos(angle) * arrowLen;
+    const ay = cy - Math.sin(angle) * arrowLen;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ax, ay);
+    ctx.strokeStyle = pal.stroke;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.globalAlpha = 1.0;
+  }
+
+  drawCrewActivePositions(rs) {
+    const { ctx } = this;
+    ctx.save();
+    const r = 3;  // marker radius in px
+
+    // Color only when takeoff routes are actually visible or being edited
+    const anyTakeoffVisible = rs && rs.takeoffRouteVisible && rs.takeoffRouteVisible.some(Boolean);
+    const editingTakeoff = rs && rs.selectedRouteType === 'takeoff' && rs.selectedRoute >= 0;
+    const useColor = anyTakeoffVisible || editingTakeoff;
+
+    for (const link of CREW_ACTIVE_LINKS) {
+      const mi = link.memberIdx;
+      if (rs && !rs.crewVisible[mi]) continue;
+
+      const member = CREW_MEMBERS[mi];
+      const route = CREW_ROUTES[link.routeId];
+      if (!member || !route) continue;
+
+      const pal = useColor ? (LIVERY_COLOURS[member.livery] || LIVERY_COLOURS.yellow) : { fill: '#999', stroke: '#777' };
+      const idleC = this.wc(member.x, member.y);
+
+      if (route.points && route.points.length > 1) {
+        // Multi-point route: draw line from idle to first point,
+        // then dashed gray lines between points, with dots at each.
+        const firstC = this.wc(route.points[0].x, route.points[0].y);
+
+        // Idle → first point
+        ctx.beginPath();
+        ctx.moveTo(idleC.x, idleC.y);
+        ctx.lineTo(firstC.x, firstC.y);
+        ctx.strokeStyle = 'rgba(160,160,160,0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        this._drawActivePoint(ctx, firstC.x, firstC.y, route.points[0].angle, pal, r);
+
+        // Lines between consecutive points + dots
+        for (let j = 1; j < route.points.length; j++) {
+          const prevC = this.wc(route.points[j - 1].x, route.points[j - 1].y);
+          const curC = this.wc(route.points[j].x, route.points[j].y);
+
+          ctx.beginPath();
+          ctx.moveTo(prevC.x, prevC.y);
+          ctx.lineTo(curC.x, curC.y);
+          ctx.strokeStyle = 'rgba(160,160,160,0.4)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          this._drawActivePoint(ctx, curC.x, curC.y, route.points[j].angle, pal, r);
+        }
+      } else {
+        // Single-point route
+        const activeC = this.wc(route.x, route.y);
+
+        // Gray line from idle to active
+        ctx.beginPath();
+        ctx.moveTo(idleC.x, idleC.y);
+        ctx.lineTo(activeC.x, activeC.y);
+        ctx.strokeStyle = 'rgba(160,160,160,0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        this._drawActivePoint(ctx, activeC.x, activeC.y, route.angle, pal, r);
+      }
     }
 
-    // t-marker
-    const pt = polylinePoint(points, t);
-    if (!pt) return pt;
+    ctx.restore();
+  }
 
-    const i = pt.segIndex;
-    if (points[i] && points[i + 1]) {
-      const ca = this.wc(points[i].x, points[i].y);
-      const cb = this.wc(points[i + 1].x, points[i + 1].y);
-      ctx.beginPath(); ctx.moveTo(ca.x, ca.y); ctx.lineTo(cb.x, cb.y);
-      ctx.strokeStyle = '#EF9F27'; ctx.lineWidth = 2.5; ctx.stroke();
+  // ── Parking crew route positions (colored when landing visible, gray otherwise) ─
+  drawUnusedRoutePositions(rs) {
+    if (!rs) return;
+    const anyTakeoffVisible = rs.takeoffRouteVisible && rs.takeoffRouteVisible.some(Boolean);
+    const editingTakeoff = rs.selectedRouteType === 'takeoff' && rs.selectedRoute >= 0;
+    const anyLandingVisible = rs.landingVisible && rs.landingRouteVisible && rs.landingRouteVisible.some(Boolean);
+    const editingLanding = rs.selectedRouteType === 'landing' && rs.selectedRoute >= 0;
+    const landingActive = anyLandingVisible || editingLanding;
+    if (!editingTakeoff && !anyTakeoffVisible && !landingActive) return;
+
+    // Color mode: use member livery colors when landing is active
+    const useColor = landingActive;
+    const { ctx } = this;
+    ctx.save();
+    const r = 3;
+
+    for (const link of NON_TAKEOFF_LINKS) {
+      const mi = link.memberId;
+      if (!rs.crewVisible[mi]) continue;
+
+      const member = CREW_MEMBERS[mi];
+      const route = CREW_ROUTES[link.routeId];
+      if (!member || !route) continue;
+
+      const pal = useColor ? (LIVERY_COLOURS[member.livery] || LIVERY_COLOURS.yellow) : null;
+      const idleC = this.wc(member.x, member.y);
+      const pts = route.points || [route];
+
+      // Dashed line from idle to first point
+      const firstC = this.wc(pts[0].x, pts[0].y);
+      ctx.beginPath();
+      ctx.moveTo(idleC.x, idleC.y);
+      ctx.lineTo(firstC.x, firstC.y);
+      ctx.strokeStyle = useColor ? 'rgba(160,160,160,0.4)' : 'rgba(160,160,160,0.35)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw each point
+      for (let j = 0; j < pts.length; j++) {
+        const c = this.wc(pts[j].x, pts[j].y);
+
+        // Connect consecutive points
+        if (j > 0) {
+          const prevC = this.wc(pts[j - 1].x, pts[j - 1].y);
+          ctx.beginPath();
+          ctx.moveTo(prevC.x, prevC.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.strokeStyle = useColor ? 'rgba(160,160,160,0.4)' : 'rgba(160,160,160,0.35)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        if (useColor) {
+          this._drawActivePoint(ctx, c.x, c.y, pts[j].angle, pal, r);
+        } else {
+          // Gray dot
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(160,160,160,0.5)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(120,120,120,0.5)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // Gray heading arrow
+          const arrowLen = 8;
+          const ax = c.x + Math.cos(pts[j].angle) * arrowLen;
+          const ay = c.y - Math.sin(pts[j].angle) * arrowLen;
+          ctx.beginPath();
+          ctx.moveTo(c.x, c.y);
+          ctx.lineTo(ax, ay);
+          ctx.strokeStyle = 'rgba(140,140,140,0.4)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
     }
 
-    const cp = this.wc(pt.x, pt.y);
-    ctx.beginPath(); ctx.arc(cp.x, cp.y, 9, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(239,159,39,0.2)'; ctx.fill();
-    ctx.beginPath(); ctx.arc(cp.x, cp.y, 6, 0, Math.PI * 2);
-    ctx.fillStyle = '#EF9F27'; ctx.fill();
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+  }
 
-    return pt;
+  // ── Active crew connection line (progress-based) ───────────────────────────
+  drawActiveCrewLines(rs) {
+    if (!rs || rs.selectedRouteType !== 'takeoff') return;
+    const ri = rs.selectedRoute;
+    if (ri < 0 || ri >= TAKEOFF_TASKS.length) return;
+
+    const task = TAKEOFF_TASKS[ri];
+    const route = rs.takeoffRoutes[ri];
+    if (!route || route.points.length < 2) return;
+
+    const t = rs.t;
+    const markerPt = polylinePoint(route.points, t);
+    if (!markerPt) return;
+
+    const markerC = this.wc(markerPt.x, markerPt.y);
+    const { ctx } = this;
+    ctx.save();
+
+    // Determine the ONE controlling entity at current progress.
+    // Progress values are HANDOFF points: step[i].progress is when
+    // step[i]'s yellow takes over from step[i-1]'s yellow (or brown).
+    let target = null;  // { x, y } in world coords
+
+    if (t === 0) {
+      // Exactly at start: brown is controlling
+      const brownRoute = CREW_ROUTES[task.brownRouteId];
+      if (brownRoute) {
+        const pos = brownRoute.points
+          ? brownRoute.points[brownRoute.points.length - 1]
+          : brownRoute;
+        target = { x: pos.x, y: pos.y };
+      }
+    } else {
+      // Find which yellow is controlling: the step whose handoff we haven't reached yet
+      // step[0] controls from 0 to step[0].progress
+      // step[1] controls from step[0].progress to step[1].progress
+      // etc.
+      let controllingStep = -1;
+      for (let i = 0; i < task.steps.length; i++) {
+        if (t < task.steps[i].progress) {
+          controllingStep = i;
+          break;
+        }
+      }
+
+      if (controllingStep >= 0) {
+        // A yellow-shirt is controlling
+        const step = task.steps[controllingStep];
+        const crewRoute = CREW_ROUTES[step.routeId];
+        if (crewRoute) {
+          const pos = crewRoute.points
+            ? crewRoute.points[crewRoute.points.length - 1]
+            : crewRoute;
+          target = { x: pos.x, y: pos.y };
+        }
+      } else {
+        // Past last step's progress: catapult has control
+        const cat = Renderer.CATAPULTS[route.runwayIdx - 1];
+        if (cat) {
+          target = { x: cat.cx, y: cat.cy };
+        }
+      }
+    }
+
+    // Draw solid gray line from progress marker to controlling position
+    if (target) {
+      const tc = this.wc(target.x, target.y);
+      ctx.strokeStyle = 'rgba(130,130,130,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(markerC.x, markerC.y);
+      ctx.lineTo(tc.x, tc.y);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  // ── Active parking crew connection line (progress-based) ──────────────────
+  drawActiveParkingCrewLines(rs) {
+    if (!rs || rs.selectedRouteType !== 'landing') return;
+    const ri = rs.selectedRoute;
+    if (ri < 0 || ri >= PARKING_TASKS.length) return;
+
+    const task = PARKING_TASKS[ri];
+    const route = rs.landingRoutes[ri];
+    if (!route || route.points.length < 2) return;
+
+    const t = rs.t;
+    const markerPt = polylinePoint(route.points, t);
+    if (!markerPt) return;
+
+    const markerC = this.wc(markerPt.x, markerPt.y);
+    const { ctx } = this;
+    ctx.save();
+
+    // Determine the ONE controlling crew at current progress.
+    // First step controls from t=0. step[i].progress is the handoff point
+    // where step[i+1] takes over. Last step (typically the brown) controls
+    // until the end (progress ~1.0).
+    let target = null;
+
+    let controllingStep = -1;
+    for (let i = 0; i < task.steps.length; i++) {
+      if (t < task.steps[i].progress) {
+        controllingStep = i;
+        break;
+      }
+    }
+
+    // If past last step's progress, the last member (brown) still controls
+    if (controllingStep < 0 && task.steps.length > 0) {
+      controllingStep = task.steps.length - 1;
+    }
+
+    if (controllingStep >= 0) {
+      const step = task.steps[controllingStep];
+      if (step.routeId >= 0) {
+        // Member at route position
+        const crewRoute = CREW_ROUTES[step.routeId];
+        if (crewRoute) {
+          const pos = crewRoute.points
+            ? crewRoute.points[crewRoute.points.length - 1]
+            : crewRoute;
+          target = { x: pos.x, y: pos.y };
+        }
+      } else {
+        // routeId -1: member at idle position
+        const member = CREW_MEMBERS[step.memberId];
+        if (member) {
+          target = { x: member.x, y: member.y };
+        }
+      }
+    }
+
+    if (target) {
+      const tc = this.wc(target.x, target.y);
+      ctx.strokeStyle = 'rgba(130,130,130,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(markerC.x, markerC.y);
+      ctx.lineTo(tc.x, tc.y);
+      ctx.stroke();
+    }
+
+    ctx.restore();
   }
 
   // ── Full frame ────────────────────────────────────────────────────────────
-  render(points, t, routeState) {
+  render(routeState) {
     this.ctx.clearRect(0, 0, this.W, this.H);
     this.drawGrid();
     this.drawPolygon();
     this.drawCatapults();
     this.drawJBDs();
+    this.drawUnusedRoutePositions(routeState);
+    this.drawCrewActivePositions(routeState);
     this.drawCrew(routeState);
-    this.drawTakeoffRoutes(routeState, t);
-    return this.drawPolyline(points, t);
+    this.drawLandingRoutes(routeState, routeState ? routeState.t : 0.5);
+    this.drawTakeoffRoutes(routeState, routeState ? routeState.t : 0.5);
+    this.drawActiveCrewLines(routeState);
+    this.drawActiveParkingCrewLines(routeState);
   }
 }

@@ -2,9 +2,8 @@
  * UI controller — binds DOM elements to application state, manages the
  * point list, slider, import/export, route panels, and canvas interactions.
  */
-import { state } from './state.js';
-import { nearestPointIndex, polylinePoint } from './polyline.js';
-import { CATAPULT_COLORS } from './route-data.js';
+import { polylinePoint } from './polyline.js';
+import { CATAPULT_COLORS, LANDING_COLOR } from './route-data.js';
 import { CREW_MEMBERS, LIVERY_COLOURS } from './crew-data.js';
 import { downloadPatchedLua, parseTakeoffRoutes } from './lua-patcher.js';
 
@@ -15,9 +14,6 @@ export class UI {
     this.renderer = renderer;
     this.canvas = renderer.canvas;
     this.rs = routeState;
-
-    /** Edit mode: 'polyline' or 'route' */
-    this.editMode = 'polyline';
 
     /** Original Lua text for patching/export. */
     this._originalLuaText = null;
@@ -42,10 +38,10 @@ export class UI {
   _bindEvents() {
     // Slider
     this.slider.addEventListener('input', () => {
-      state.setT(this.slider.value / 100);
+      this.rs.setT(this.slider.value / 100);
     });
 
-    // Canvas — click to add, drag to move, middle/shift-drag to pan
+    // Canvas — drag to move, middle/shift-drag to pan, right-click to add/insert
     this._panning = false;
     this._panLast = null;
     this.canvas.addEventListener('pointerdown', e => this._onPointerDown(e));
@@ -61,14 +57,6 @@ export class UI {
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
       this.viewport.zoom(factor, w.x, w.y);
       this._update();
-    }, { passive: false });
-
-    // Touch: prevent scroll while dragging/panning on canvas
-    this.canvas.addEventListener('touchstart', e => {
-      if (state.dragging >= 0 || this._panning) e.preventDefault();
-    }, { passive: false });
-    this.canvas.addEventListener('touchmove', e => {
-      if (state.dragging >= 0 || this._panning) e.preventDefault();
     }, { passive: false });
 
     // Buttons
@@ -113,7 +101,13 @@ export class UI {
       this.rs.setAllTakeoffRoutes(e.target.checked);
     });
     document.getElementById('landing-global').addEventListener('change', e => {
-      if (this.rs.landingVisible !== e.target.checked) this.rs.toggleLandingGlobal();
+      if (e.target.checked) {
+        if (!this.rs.landingVisible) this.rs.toggleLandingGlobal();
+        this.rs.setAllLandingRoutes(true);
+      } else {
+        this.rs.setAllLandingRoutes(false);
+        if (this.rs.landingVisible) this.rs.toggleLandingGlobal();
+      }
     });
     document.getElementById('crew-global').addEventListener('change', e => {
       this.rs.setAllCrew(e.target.checked);
@@ -123,10 +117,9 @@ export class UI {
     window.addEventListener('resize', () => this._resize());
 
     // State changes → re-render
-    state.onChange(() => this._update());
     this.rs.onChange(() => {
       this._syncRoutePanel();
-      if (this.editMode === 'route') this.renderList();
+      this.renderList();
       this._update();
     });
   }
@@ -136,18 +129,9 @@ export class UI {
     const list = document.getElementById('takeoff-route-list');
     this._buildTakeoffRows(list);
 
-    // Landing placeholder rows
+    // Landing route rows
     const lList = document.getElementById('landing-route-list');
-    for (let i = 0; i < 16; i++) {
-      const row = document.createElement('div');
-      row.className = 'route-row';
-      row.innerHTML = `
-        <span class="route-color-dot" style="background:#aaa"></span>
-        <input type="checkbox" checked data-li="${i}" disabled>
-        <span class="route-label" style="color:#aaa">${i + 1}. Landing route ${i + 1}</span>
-      `;
-      lList.appendChild(row);
-    }
+    this._buildLandingRows(lList);
 
     // Crew member rows
     const cList = document.getElementById('crew-list');
@@ -192,12 +176,51 @@ export class UI {
         this.rs.revertRoute(i);
       });
       row.querySelector('.route-edit-btn').addEventListener('click', () => {
-        if (this.rs.selectedRoute === i) {
+        if (this.rs.selectedRouteType === 'takeoff' && this.rs.selectedRoute === i) {
           this.rs.deselectRoute();
-          this.editMode = 'polyline';
         } else {
-          this.rs.selectRoute(i);
-          this.editMode = 'route';
+          this.rs.selectRoute('takeoff', i);
+        }
+        this.renderList();
+      });
+      list.appendChild(row);
+    }
+  }
+
+  _buildLandingRows(list) {
+    for (let i = 0; i < this.rs.landingRoutes.length; i++) {
+      const route = this.rs.landingRoutes[i];
+      const color = LANDING_COLOR;
+      const row = document.createElement('div');
+      row.className = 'route-row';
+      row.dataset.landingRoute = i;
+      row.innerHTML = `
+        <span class="route-color-dot" style="background:${color}"></span>
+        <input type="checkbox" checked data-li="${i}">
+        <input class="route-label-input" type="text" value="${route.id}. ${route.label}" data-li="${i}">
+        <button class="route-edit-btn" data-li="${i}" title="Edit route on canvas">Edit</button>
+        <button class="route-revert-btn" data-li="${i}" title="Revert to original" disabled>Revert</button>
+      `;
+      row.querySelector('input[type="checkbox"]').addEventListener('change', () => {
+        this.rs.toggleLandingRoute(i);
+        // Auto-enable master visibility when any individual route is checked
+        if (this.rs.landingRouteVisible[i] && !this.rs.landingVisible) {
+          this.rs.toggleLandingGlobal();
+        }
+      });
+      row.querySelector('.route-label-input').addEventListener('change', (e) => {
+        this.rs.landingRoutes[i].label = e.target.value;
+      });
+      row.querySelector('.route-revert-btn').addEventListener('click', () => {
+        this.rs.revertLandingRoute(i);
+      });
+      row.querySelector('.route-edit-btn').addEventListener('click', () => {
+        if (this.rs.selectedRouteType === 'landing' && this.rs.selectedRoute === i) {
+          this.rs.deselectRoute();
+        } else {
+          // Auto-enable landing visibility when editing a landing route
+          if (!this.rs.landingVisible) this.rs.toggleLandingGlobal();
+          this.rs.selectRoute('landing', i);
         }
         this.renderList();
       });
@@ -213,17 +236,33 @@ export class UI {
   }
 
   _syncRoutePanel() {
+    // Takeoff panel
     const rows = document.querySelectorAll('#takeoff-route-list .route-row');
     for (let i = 0; i < rows.length; i++) {
       const cb = rows[i].querySelector('input[type="checkbox"]');
       cb.checked = this.rs.takeoffRouteVisible[i];
       const btn = rows[i].querySelector('.route-edit-btn');
-      btn.classList.toggle('active', this.rs.selectedRoute === i);
-      rows[i].classList.toggle('selected', this.rs.selectedRoute === i);
+      const isSelected = this.rs.selectedRouteType === 'takeoff' && this.rs.selectedRoute === i;
+      btn.classList.toggle('active', isSelected);
+      rows[i].classList.toggle('selected', isSelected);
       const revertBtn = rows[i].querySelector('.route-revert-btn');
       revertBtn.disabled = !this.rs.isRouteModified(i);
     }
     document.getElementById('takeoff-global').checked = this.rs.allTakeoffRoutesVisible();
+
+    // Landing panel
+    const lRows = document.querySelectorAll('#landing-route-list .route-row');
+    for (let i = 0; i < lRows.length; i++) {
+      const cb = lRows[i].querySelector('input[type="checkbox"]');
+      cb.checked = this.rs.landingRouteVisible[i];
+      const btn = lRows[i].querySelector('.route-edit-btn');
+      const isSelected = this.rs.selectedRouteType === 'landing' && this.rs.selectedRoute === i;
+      btn.classList.toggle('active', isSelected);
+      lRows[i].classList.toggle('selected', isSelected);
+      const revertBtn = lRows[i].querySelector('.route-revert-btn');
+      revertBtn.disabled = !this.rs.isLandingRouteModified(i);
+    }
+    document.getElementById('landing-global').checked = this.rs.landingVisible && this.rs.allLandingRoutesVisible();
 
     // Crew sync
     const crewRows = document.querySelectorAll('#crew-list .route-row');
@@ -252,9 +291,7 @@ export class UI {
   }
 
   _isPanButton(e) {
-    // In route edit mode, right-click is used for adding points, so only
-    // middle-click and shift+left-drag pan.  Outside route mode, right-click pans.
-    if (this.editMode === 'route') {
+    if (this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
       return e.button === 1 || (e.button === 0 && e.shiftKey);
     }
     return e.button === 1 || e.button === 2 || (e.button === 0 && e.shiftKey);
@@ -267,14 +304,12 @@ export class UI {
       this.canvas.setPointerCapture(e.pointerId);
       return;
     }
-    if (this.editMode === 'route') {
+    if (this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
       if (e.button === 2) {
         this._onRouteRightClick(e);
       } else {
         this._onRoutePointerDown(e);
       }
-    } else {
-      this._onPolylinePointerDown(e);
     }
   }
 
@@ -286,52 +321,32 @@ export class UI {
       this._panLast = this._canvasWorld(e);
       return;
     }
-    if (this.editMode === 'route') {
+    if (this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
       this._onRoutePointerMove(e);
-    } else {
-      this._onPolylinePointerMove(e);
     }
   }
 
   _onPointerUp(e) {
     this._panning = false;
     this._panLast = null;
-    if (this.editMode === 'route') {
-      this.rs.draggingPoint = -1;
-    } else {
-      state.dragging = -1;
-    }
-  }
-
-  // ── Polyline pointer handlers ─────────────────────────────────────────
-  _onPolylinePointerDown(e) {
-    const w = this._canvasWorld(e);
-    const idx = nearestPointIndex(state.points, w.x, w.y, this._hitRadius());
-    if (idx >= 0) {
-      state.dragging = idx;
-      this.canvas.setPointerCapture(e.pointerId);
-    } else {
-      state.addPoint(+w.x.toFixed(2), +w.y.toFixed(2));
-      this.renderList();
-    }
-  }
-
-  _onPolylinePointerMove(e) {
-    if (state.dragging < 0) return;
-    const w = this._canvasWorld(e);
-    state.movePoint(state.dragging, +w.x.toFixed(2), +w.y.toFixed(2));
-    this.renderList();
+    this.rs.draggingPoint = -1;
   }
 
   // ── Route pointer handlers ────────────────────────────────────────────
+  /** Get the points array of the currently selected route. */
+  _selectedPoints() {
+    const route = this.rs.getSelectedRoute();
+    return route ? route.points : null;
+  }
+
   _onRoutePointerDown(e) {
     const ri = this.rs.selectedRoute;
     if (ri < 0) return;
     const w = this._canvasWorld(e);
-    const pts = this.rs.takeoffRoutes[ri].points;
+    const pts = this._selectedPoints();
+    if (!pts) return;
     const hr = this._hitRadius();
 
-    // Find nearest waypoint
     let best = -1, bestD = Infinity;
     for (let j = 0; j < pts.length; j++) {
       const dx = pts[j].x - w.x, dy = pts[j].y - w.y;
@@ -345,15 +360,14 @@ export class UI {
     }
   }
 
-  /** Right-click: insert on nearest segment, or append if not near any segment. */
   _onRouteRightClick(e) {
     const ri = this.rs.selectedRoute;
     if (ri < 0) return;
     const w = this._canvasWorld(e);
-    const pts = this.rs.takeoffRoutes[ri].points;
-    const hr = this._hitRadius() * 2; // slightly larger hit zone for segments
+    const pts = this._selectedPoints();
+    if (!pts) return;
+    const hr = this._hitRadius() * 2;
 
-    // Find nearest segment
     let bestSeg = -1, bestD = Infinity;
     for (let j = 0; j < pts.length - 1; j++) {
       const d = this._distToSegment(w, pts[j], pts[j + 1]);
@@ -363,16 +377,13 @@ export class UI {
     const x = +w.x.toFixed(2);
     const y = +w.y.toFixed(2);
     if (bestSeg >= 0) {
-      // Insert between segment endpoints
       this.rs.addWaypoint(ri, bestSeg, x, y);
     } else {
-      // Append at end
       this.rs.addWaypoint(ri, pts.length - 1, x, y);
     }
     this.renderList();
   }
 
-  /** Distance from point p to line segment a–b. */
   _distToSegment(p, a, b) {
     const dx = b.x - a.x, dy = b.y - a.y;
     const lenSq = dx * dx + dy * dy;
@@ -394,79 +405,58 @@ export class UI {
   renderList() {
     this.ptRows.innerHTML = '';
     const ri = this.rs.selectedRoute;
-    const isRoute = this.editMode === 'route' && ri >= 0;
-    const points = isRoute ? this.rs.takeoffRoutes[ri].points : state.points;
+    const type = this.rs.selectedRouteType;
+    const isRoute = ri >= 0 && type;
+    const route = isRoute ? this.rs.getSelectedRoute() : null;
+    const points = route ? route.points : [];
 
     // Update title
     const title = document.getElementById('pt-list-title');
-    if (isRoute) {
-      const route = this.rs.takeoffRoutes[ri];
-      title.textContent = `Route ${route.id}: ${route.label}`;
+    if (route) {
+      const prefix = type === 'landing' ? 'Landing' : 'Route';
+      title.textContent = `${prefix} ${route.id}: ${route.label}`;
     } else {
-      title.textContent = 'Polyline Points';
+      title.textContent = 'No route selected';
     }
 
-    // Update header to show context
+    if (!route) return;
+
+    // Update header to show route columns
     const header = document.querySelector('.pt-header');
-    if (isRoute) {
-      const route = this.rs.takeoffRoutes[ri];
-      header.innerHTML = `<span>#</span><span>x</span><span>y</span><span>v</span><span></span>`;
-      header.style.gridTemplateColumns = '28px 1fr 1fr 60px 28px';
-    } else {
-      header.innerHTML = `<span>#</span><span>x</span><span>y</span><span></span>`;
-      header.style.gridTemplateColumns = '28px 1fr 1fr 28px';
-    }
+    header.innerHTML = `<span>#</span><span>x</span><span>y</span><span>v</span><span></span>`;
+    header.style.gridTemplateColumns = '28px 1fr 1fr 60px 28px';
 
     points.forEach((p, i) => {
       const row = document.createElement('div');
       row.className = 'pt-row';
-      if (isRoute) {
-        row.style.gridTemplateColumns = '28px 1fr 1fr 60px 28px';
-        row.innerHTML = `
-          <span class="pt-idx">${i}</span>
-          <input type="number" value="${p.x.toFixed(2)}" step="0.1" data-i="${i}" data-k="x">
-          <input type="number" value="${p.y.toFixed(2)}" step="0.1" data-i="${i}" data-k="y">
-          <input type="number" value="${(p.v ?? 1).toFixed(2)}" step="0.1" data-i="${i}" data-k="v" style="width:100%">
-          <button class="del-btn" title="Remove">\u2715</button>
-        `;
-        row.querySelector('.del-btn').addEventListener('click', () => {
-          this.rs.removeWaypoint(ri, i);
-          this.renderList();
+      row.style.gridTemplateColumns = '28px 1fr 1fr 60px 28px';
+      row.innerHTML = `
+        <span class="pt-idx">${i}</span>
+        <input type="number" value="${p.x.toFixed(2)}" step="0.1" data-i="${i}" data-k="x">
+        <input type="number" value="${p.y.toFixed(2)}" step="0.1" data-i="${i}" data-k="y">
+        <input type="number" value="${(p.v ?? 1).toFixed(2)}" step="0.1" data-i="${i}" data-k="v" style="width:100%">
+        <button class="del-btn" title="Remove">\u2715</button>
+      `;
+      row.querySelector('.del-btn').addEventListener('click', () => {
+        this.rs.removeWaypoint(ri, i);
+        this.renderList();
+      });
+      for (const inp of row.querySelectorAll('input')) {
+        inp.addEventListener('input', () => {
+          const val = parseFloat(inp.value);
+          if (isNaN(val)) return;
+          const idx = +inp.dataset.i;
+          const key = inp.dataset.k;
+          if (key === 'v') {
+            route.points[idx].v = val;
+            this.rs._notify();
+          } else {
+            const pt = route.points[idx];
+            this.rs.moveWaypoint(ri, idx,
+              key === 'x' ? val : pt.x,
+              key === 'y' ? val : pt.y);
+          }
         });
-        for (const inp of row.querySelectorAll('input')) {
-          inp.addEventListener('input', () => {
-            const val = parseFloat(inp.value);
-            if (isNaN(val)) return;
-            const idx = +inp.dataset.i;
-            const key = inp.dataset.k;
-            if (key === 'v') {
-              this.rs.takeoffRoutes[ri].points[idx].v = val;
-              this.rs._notify();
-            } else {
-              const pt = this.rs.takeoffRoutes[ri].points[idx];
-              this.rs.moveWaypoint(ri, idx,
-                key === 'x' ? val : pt.x,
-                key === 'y' ? val : pt.y);
-            }
-          });
-        }
-      } else {
-        row.innerHTML = `
-          <span class="pt-idx">${i}</span>
-          <input type="number" value="${p.x.toFixed(2)}" step="0.1" data-i="${i}" data-k="x">
-          <input type="number" value="${p.y.toFixed(2)}" step="0.1" data-i="${i}" data-k="y">
-          <button class="del-btn" title="Remove">\u2715</button>
-        `;
-        row.querySelector('.del-btn').addEventListener('click', () => {
-          state.deletePoint(i);
-          this.renderList();
-        });
-        for (const inp of row.querySelectorAll('input')) {
-          inp.addEventListener('input', () => {
-            const val = parseFloat(inp.value);
-            if (!isNaN(val)) state.updatePoint(+inp.dataset.i, inp.dataset.k, val);
-          });
-        }
       }
       this.ptRows.appendChild(row);
     });
@@ -477,11 +467,9 @@ export class UI {
     const y = parseFloat(this.addYInput.value);
     if (isNaN(x) || isNaN(y)) return;
     const ri = this.rs.selectedRoute;
-    if (this.editMode === 'route' && ri >= 0) {
-      const pts = this.rs.takeoffRoutes[ri].points;
-      this.rs.addWaypoint(ri, pts.length - 1, x, y);
-    } else {
-      state.addPoint(x, y);
+    if (ri >= 0 && this.rs.selectedRouteType) {
+      const pts = this._selectedPoints();
+      if (pts) this.rs.addWaypoint(ri, pts.length - 1, x, y);
     }
     this.addXInput.value = '';
     this.addYInput.value = '';
@@ -490,20 +478,18 @@ export class UI {
 
   // ── Render loop ────────────────────────────────────────────────────────
   _update() {
-    this.tval.textContent = state.t.toFixed(2);
-    this.slider.value = Math.round(state.t * 100);
-    const pt = this.renderer.render(state.points, state.t, this.rs);
+    this.tval.textContent = this.rs.t.toFixed(2);
+    this.slider.value = Math.round(this.rs.t * 100);
+    this.renderer.render(this.rs);
 
-    // Update coord display from route marker or polyline marker
-    const ri = this.rs.selectedRoute;
-    if (this.editMode === 'route' && ri >= 0) {
-      const rpt = polylinePoint(this.rs.takeoffRoutes[ri].points, state.t);
+    // Update coord display from route marker
+    const route = this.rs.getSelectedRoute();
+    if (route) {
+      const rpt = polylinePoint(route.points, this.rs.t);
       if (rpt) {
         this.coordout.textContent = `x: ${rpt.x.toFixed(2)}, y: ${rpt.y.toFixed(2)}`;
       }
-    } else if (pt) {
-      this.coordout.textContent = `x: ${pt.x.toFixed(2)}, y: ${pt.y.toFixed(2)}`;
-    } else if (state.points.length < 2) {
+    } else {
       this.coordout.textContent = 'x: \u2014, y: \u2014';
     }
   }

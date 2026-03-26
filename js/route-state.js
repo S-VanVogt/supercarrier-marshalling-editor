@@ -20,10 +20,15 @@ class RouteState {
     this.takeoffRouteVisible = new Array(TAKEOFF_ROUTES.length).fill(true);
 
     this.landingVisible = false;
-    this.landingRouteVisible = new Array(16).fill(true);
+    this.landingRouteVisible = new Array(LANDING_ROUTES.length).fill(true);
 
     this.crewVisible = new Array(CREW_MEMBERS.length).fill(true);
 
+    /** Progress ratio 0–1 for route marker. */
+    this.t = 0.5;
+
+    /** Type of selected route: 'takeoff' | 'landing' | null */
+    this.selectedRouteType = null;
     /** Index of route selected for editing (-1 = none). */
     this.selectedRoute = -1;
     /** Index of waypoint being dragged (-1 = none). */
@@ -42,6 +47,27 @@ class RouteState {
     for (const fn of this._listeners) fn();
   }
 
+  setT(value) {
+    this.t = Math.max(0, Math.min(1, value));
+    this._notify();
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────
+
+  /** Get the routes array for the currently selected type. */
+  _selectedRoutes() {
+    if (this.selectedRouteType === 'takeoff') return this.takeoffRoutes;
+    if (this.selectedRouteType === 'landing') return this.landingRoutes;
+    return null;
+  }
+
+  /** Get the currently selected route object, or null. */
+  getSelectedRoute() {
+    const routes = this._selectedRoutes();
+    if (!routes || this.selectedRoute < 0) return null;
+    return routes[this.selectedRoute] || null;
+  }
+
   // ── Visibility toggles ──────────────────────────────────────────────
 
   setAllTakeoffRoutes(on) {
@@ -56,6 +82,11 @@ class RouteState {
 
   toggleLandingGlobal() {
     this.landingVisible = !this.landingVisible;
+    this._notify();
+  }
+
+  setAllLandingRoutes(on) {
+    this.landingRouteVisible.fill(on);
     this._notify();
   }
 
@@ -82,19 +113,23 @@ class RouteState {
 
   // ── Selection / editing ─────────────────────────────────────────────
 
-  selectRoute(i) {
+  selectRoute(type, i) {
+    this.selectedRouteType = type;
     this.selectedRoute = i;
     this._notify();
   }
 
   deselectRoute() {
+    this.selectedRouteType = null;
     this.selectedRoute = -1;
     this.draggingPoint = -1;
     this._notify();
   }
 
   moveWaypoint(routeIdx, pointIdx, x, y) {
-    const pt = this.takeoffRoutes[routeIdx]?.points[pointIdx];
+    const routes = this._selectedRoutes();
+    if (!routes) return;
+    const pt = routes[routeIdx]?.points[pointIdx];
     if (pt) {
       pt.x = x;
       pt.y = y;
@@ -103,7 +138,9 @@ class RouteState {
   }
 
   addWaypoint(routeIdx, afterIdx, x, y) {
-    const route = this.takeoffRoutes[routeIdx];
+    const routes = this._selectedRoutes();
+    if (!routes) return;
+    const route = routes[routeIdx];
     if (route) {
       route.points.splice(afterIdx + 1, 0, { x, y, v: 1.0 });
       this._notify();
@@ -111,7 +148,9 @@ class RouteState {
   }
 
   removeWaypoint(routeIdx, pointIdx) {
-    const route = this.takeoffRoutes[routeIdx];
+    const routes = this._selectedRoutes();
+    if (!routes) return;
+    const route = routes[routeIdx];
     if (route && route.points.length > 2) {
       route.points.splice(pointIdx, 1);
       this._notify();
@@ -128,6 +167,16 @@ class RouteState {
     return this.takeoffRouteVisible.every(Boolean);
   }
 
+  /** Is a specific landing route visible? */
+  isLandingRouteVisible(i) {
+    return this.landingVisible && this.landingRouteVisible[i];
+  }
+
+  /** Are all landing routes currently visible? */
+  allLandingRoutesVisible() {
+    return this.landingRouteVisible.every(Boolean);
+  }
+
   // ── Import ─────────────────────────────────────────────────────────
 
   /** Replace all takeoff routes with imported data. */
@@ -137,6 +186,20 @@ class RouteState {
       points: r.points.map(p => ({ ...p })),
     }));
     this.takeoffRouteVisible = new Array(routes.length).fill(true);
+    this.selectedRouteType = null;
+    this.selectedRoute = -1;
+    this.draggingPoint = -1;
+    this._notify();
+  }
+
+  /** Replace all landing routes with imported data. */
+  loadLandingRoutes(routes) {
+    this.landingRoutes = routes.map(r => ({
+      ...r,
+      points: r.points.map(p => ({ ...p })),
+    }));
+    this.landingRouteVisible = new Array(routes.length).fill(true);
+    this.selectedRouteType = null;
     this.selectedRoute = -1;
     this.draggingPoint = -1;
     this._notify();
@@ -144,17 +207,34 @@ class RouteState {
 
   // ── Revert / diff ─────────────────────────────────────────────────────
 
-  /** Reset a single route to its original data. */
+  /** Reset a single takeoff route to its original data. */
   revertRoute(i) {
     const orig = TAKEOFF_ROUTES[i];
     this.takeoffRoutes[i] = { ...orig, points: orig.points.map(p => ({ ...p })) };
     this._notify();
   }
 
-  /** Has a route been modified from its original data? */
+  /** Has a takeoff route been modified from its original data? */
   isRouteModified(i) {
     const orig = TAKEOFF_ROUTES[i];
     const curr = this.takeoffRoutes[i];
+    if (orig.points.length !== curr.points.length) return true;
+    return orig.points.some((p, j) =>
+      p.x !== curr.points[j].x || p.y !== curr.points[j].y || p.v !== curr.points[j].v
+    );
+  }
+
+  /** Reset a single landing route to its original data. */
+  revertLandingRoute(i) {
+    const orig = LANDING_ROUTES[i];
+    this.landingRoutes[i] = { ...orig, points: orig.points.map(p => ({ ...p })) };
+    this._notify();
+  }
+
+  /** Has a landing route been modified from its original data? */
+  isLandingRouteModified(i) {
+    const orig = LANDING_ROUTES[i];
+    const curr = this.landingRoutes[i];
     if (orig.points.length !== curr.points.length) return true;
     return orig.points.some((p, j) =>
       p.x !== curr.points[j].x || p.y !== curr.points[j].y || p.v !== curr.points[j].v
