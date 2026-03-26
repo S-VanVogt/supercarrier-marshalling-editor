@@ -247,6 +247,15 @@ export class Renderer {
       ctx.lineWidth = 1.2;
       ctx.stroke();
 
+      // Selection ring (crew idle edit mode)
+      if (rs && rs.crewEditMode === 'idle' && rs.selectedCrewIdx === mi) {
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, r + 5, 0, Math.PI * 2);
+        ctx.strokeStyle = pal.fill;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
       // label tag
       const label = m.name;
       const tw = ctx.measureText(label).width;
@@ -492,7 +501,8 @@ export class Renderer {
     // Color only when takeoff routes are actually visible or being edited
     const anyTakeoffVisible = rs && rs.takeoffRouteVisible && rs.takeoffRouteVisible.some(Boolean);
     const editingTakeoff = rs && rs.selectedRouteType === 'takeoff' && rs.selectedRoute >= 0;
-    const useColor = anyTakeoffVisible || editingTakeoff;
+    const editingActiveCrew = rs && rs.crewEditMode === 'active';
+    const useColor = anyTakeoffVisible || editingTakeoff || editingActiveCrew;
 
     for (const link of CREW_ACTIVE_LINKS) {
       const mi = link.memberIdx;
@@ -538,6 +548,17 @@ export class Renderer {
 
           this._drawActivePoint(ctx, curC.x, curC.y, route.points[j].angle, pal, r);
         }
+
+        // Selection ring for multi-point active crew edit mode
+        if (rs && rs.crewEditMode === 'active' && rs.selectedCrewIdx === link.routeId) {
+          const lastPt = route.points[route.points.length - 1];
+          const lastC = this.wc(lastPt.x, lastPt.y);
+          ctx.beginPath();
+          ctx.arc(lastC.x, lastC.y, r + 5, 0, Math.PI * 2);
+          ctx.strokeStyle = pal.fill;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
       } else {
         // Single-point route
         const activeC = this.wc(route.x, route.y);
@@ -553,6 +574,15 @@ export class Renderer {
         ctx.setLineDash([]);
 
         this._drawActivePoint(ctx, activeC.x, activeC.y, route.angle, pal, r);
+
+        // Selection ring for active crew edit mode
+        if (rs && rs.crewEditMode === 'active' && rs.selectedCrewIdx === link.routeId) {
+          ctx.beginPath();
+          ctx.arc(activeC.x, activeC.y, r + 5, 0, Math.PI * 2);
+          ctx.strokeStyle = pal.fill;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
       }
     }
 

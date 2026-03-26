@@ -63,13 +63,17 @@
 
   <!-- Lua Import / Export -->
   <details class="panel" id="panel-lua-io" open>
-    <summary>RunwaysAndRoutes Import / Export</summary>
+    <summary>Import / Export</summary>
     <div class="panel-body">
       <div class="btn-row">
         <button id="btn-import-lua">Import RunwaysAndRoutes</button>
         <button id="btn-import-crew">Import crew.lua</button>
         <button id="btn-export-lua">Export RunwaysAndRoutes</button>
+        <button id="btn-export-crew">Export Crew</button>
+      </div>
+      <div class="btn-row" style="margin-top:4px">
         <input type="text" id="lua-header-comment" placeholder="Header comment for exported RR lua" style="flex:1;min-width:160px;font-size:12px;padding:4px 8px;border:0.5px solid #b4b2a9;border-radius:8px;outline:none">
+        <input type="text" id="crew-header-comment" placeholder="Header comment for exported crew lua" style="flex:1;min-width:160px;font-size:12px;padding:4px 8px;border:0.5px solid #b4b2a9;border-radius:8px;outline:none">
       </div>
     </div>
   </details>
@@ -84,7 +88,24 @@
           Show all crew members
         </label>
       </div>
-      <div class="route-list" id="crew-list"></div>
+
+      <!-- Idle Positions sub-section -->
+      <div class="crew-section">
+        <div class="crew-section-header">
+          <span class="crew-section-title">Idle Positions (members)</span>
+          <button id="btn-edit-idle-crew" class="route-edit-btn" title="Edit idle positions on canvas">Edit</button>
+        </div>
+        <div class="route-list" id="crew-idle-list"></div>
+      </div>
+
+      <!-- Active Positions sub-section -->
+      <div class="crew-section">
+        <div class="crew-section-header">
+          <span class="crew-section-title">Active Positions (routes)</span>
+          <button id="btn-edit-active-crew" class="route-edit-btn" title="Edit active positions on canvas">Edit</button>
+        </div>
+        <div class="route-list" id="crew-active-list"></div>
+      </div>
     </div>
   </details>
 </div>

@@ -24,6 +24,7 @@ Pure vanilla JS (ES modules), no build step, no framework. Canvas 2D rendering w
 - `js/takeoff-tasks-data.js` — 16 takeoff task definitions with brown/yellow handoff steps, `TAKEOFF_USED_ROUTE_IDS`, `PARKING_ASSIGNMENTS[]`, `NON_TAKEOFF_LINKS[]`
 - `js/crew-lua-parser.js` — Parses crew.lua text into members/routes/tasks data structures
 - `js/lua-patcher.js` — RunwaysAndRoutes.lua import/export (preserves structure, strips block comments)
+- `js/crew-lua-patcher.js` — crew.lua export: patches edited member positions/headings and route positions/angles back into original crew.lua text
 - `js/polygon-data.js` — Carrier deck outline polygon
 - `js/polyline.js` — Legacy polyline math utilities (unused, can be removed)
 - `js/state.js` — Legacy polyline state (unused, can be removed)
@@ -75,6 +76,16 @@ grid → polygon → catapults → JBDs → unusedRoutePositions → crewActiveP
 - y = across deck
 - In RunwaysAndRoutes.lua points: `{{x, deckHeight, z}, v}` where x→viewport X, z→viewport Y, deckHeight(20.1494) ignored
 
+## Crew Editing
+
+- **Idle positions** (members): click to select, drag to move x/y, scroll wheel to rotate heading (5° increments)
+- **Active positions** (routes): same interaction, angle stored in radians internally, displayed as degrees
+- Edit modes are mutually exclusive with route editing
+- Selection shown with a ring around the crew dot on canvas
+- Point list panel shows editable x/y/hdg (idle) or x/y/angle (active) fields
+- Revert button per member/route restores original values
+- Export patches edited values back into original crew.lua text, preserving all other content
+
 ## Reference Files (not in repo)
 - `G:/OneDrive/ClaudeAI/DCS rr ref/crew.lua` — Source crew data
 - `G:/OneDrive/ClaudeAI/DCS rr ref/USS_Nimitz_RunwaysAndRoutes.lua` — Source route data
@@ -83,3 +94,4 @@ grid → polygon → catapults → JBDs → unusedRoutePositions → crewActiveP
 - `polyline-app-backup-v4` — After crew active positions and task-based crew control
 - `polyline-app-backup-v5` — After landing routes and context-aware crew coloring
 - `polyline-app-backup-v6` — After crew.lua import, comment fix, always-show landing crew
+- `polyline-app-backup-v7` — After editable crew positions/heading with crew.lua export

@@ -4,6 +4,7 @@
  */
 import { TAKEOFF_ROUTES, LANDING_ROUTES } from './route-data.js';
 import { CREW_MEMBERS } from './crew-data.js';
+import { CREW_ROUTES } from './crew-routes-data.js';
 
 function cloneRoutes(src) {
   return src.map(r => ({
@@ -33,6 +34,24 @@ class RouteState {
     this.selectedRoute = -1;
     /** Index of waypoint being dragged (-1 = none). */
     this.draggingPoint = -1;
+
+    // ── Crew editing state ──────────────────────────────────────────────
+    /** Crew edit mode: 'idle' | 'active' | null */
+    this.crewEditMode = null;
+    /** Index of selected crew member/route for editing (-1 = none). */
+    this.selectedCrewIdx = -1;
+    /** Index of hovered crew member/route (-1 = none), for scroll-wheel rotation. */
+    this.hoveredCrewIdx = -1;
+    /** Whether a crew dot is being dragged. */
+    this.draggingCrew = false;
+
+    // Snapshots for revert
+    this._originalMembers = CREW_MEMBERS.map(m => ({ ...m }));
+    this._originalRoutes = CREW_ROUTES.map(r => {
+      const clone = { ...r };
+      if (r.points) clone.points = r.points.map(p => ({ ...p }));
+      return clone;
+    });
 
     /** @type {Set<() => void>} */
     this._listeners = new Set();
@@ -114,6 +133,13 @@ class RouteState {
   // ── Selection / editing ─────────────────────────────────────────────
 
   selectRoute(type, i) {
+    // Mutual exclusivity: exit crew edit when selecting a route
+    if (this.crewEditMode) {
+      this.crewEditMode = null;
+      this.selectedCrewIdx = -1;
+      this.hoveredCrewIdx = -1;
+      this.draggingCrew = false;
+    }
     this.selectedRouteType = type;
     this.selectedRoute = i;
     this._notify();
@@ -124,6 +150,128 @@ class RouteState {
     this.selectedRoute = -1;
     this.draggingPoint = -1;
     this._notify();
+  }
+
+  // ── Crew editing ──────────────────────────────────────────────────
+
+  enterCrewEdit(mode) {
+    // Mutual exclusivity: exit route edit when entering crew edit
+    if (this.selectedRoute >= 0) {
+      this.selectedRouteType = null;
+      this.selectedRoute = -1;
+      this.draggingPoint = -1;
+    }
+    this.crewEditMode = mode;
+    this.selectedCrewIdx = -1;
+    this.hoveredCrewIdx = -1;
+    this.draggingCrew = false;
+    this._notify();
+  }
+
+  exitCrewEdit() {
+    this.crewEditMode = null;
+    this.selectedCrewIdx = -1;
+    this.hoveredCrewIdx = -1;
+    this.draggingCrew = false;
+    this._notify();
+  }
+
+  selectCrewMember(idx) {
+    this.selectedCrewIdx = idx;
+    this._notify();
+  }
+
+  moveCrewMember(idx, x, y) {
+    if (this.crewEditMode === 'idle') {
+      const m = CREW_MEMBERS[idx];
+      if (m) { m.x = x; m.y = y; this._notify(); }
+    } else if (this.crewEditMode === 'active') {
+      const r = CREW_ROUTES[idx];
+      if (r) {
+        r.x = x; r.y = y;
+        // Also update last point if multi-point route
+        if (r.points && r.points.length > 0) {
+          r.points[r.points.length - 1].x = x;
+          r.points[r.points.length - 1].y = y;
+        }
+        this._notify();
+      }
+    }
+  }
+
+  rotateCrewMember(idx, deltaDeg) {
+    if (this.crewEditMode === 'idle') {
+      const m = CREW_MEMBERS[idx];
+      if (m) {
+        m.hdg = ((m.hdg + deltaDeg + 180) % 360 + 360) % 360 - 180;
+        this._notify();
+      }
+    } else if (this.crewEditMode === 'active') {
+      const r = CREW_ROUTES[idx];
+      if (r) {
+        const deltaRad = deltaDeg * Math.PI / 180;
+        r.angle = r.angle + deltaRad;
+        // Wrap to [-PI, PI]
+        while (r.angle > Math.PI) r.angle -= 2 * Math.PI;
+        while (r.angle < -Math.PI) r.angle += 2 * Math.PI;
+        // Also update last point if multi-point route
+        if (r.points && r.points.length > 0) {
+          const lp = r.points[r.points.length - 1];
+          lp.angle = r.angle;
+        }
+        this._notify();
+      }
+    }
+  }
+
+  isCrewMemberModified(idx) {
+    const orig = this._originalMembers[idx];
+    const curr = CREW_MEMBERS[idx];
+    if (!orig || !curr) return false;
+    return orig.x !== curr.x || orig.y !== curr.y || orig.hdg !== curr.hdg;
+  }
+
+  isCrewRouteModified(idx) {
+    const orig = this._originalRoutes[idx];
+    const curr = CREW_ROUTES[idx];
+    if (!orig || !curr) return false;
+    if (orig.x !== curr.x || orig.y !== curr.y || orig.angle !== curr.angle) return true;
+    if (orig.points && curr.points) {
+      if (orig.points.length !== curr.points.length) return true;
+      return orig.points.some((p, j) =>
+        p.x !== curr.points[j].x || p.y !== curr.points[j].y || p.angle !== curr.points[j].angle
+      );
+    }
+    return false;
+  }
+
+  revertCrewMember(idx) {
+    const orig = this._originalMembers[idx];
+    if (!orig) return;
+    const m = CREW_MEMBERS[idx];
+    m.x = orig.x; m.y = orig.y; m.hdg = orig.hdg;
+    this._notify();
+  }
+
+  revertCrewRoute(idx) {
+    const orig = this._originalRoutes[idx];
+    if (!orig) return;
+    const r = CREW_ROUTES[idx];
+    r.x = orig.x; r.y = orig.y; r.angle = orig.angle;
+    if (orig.points) {
+      r.points = orig.points.map(p => ({ ...p }));
+    }
+    this._notify();
+  }
+
+  /** Refresh snapshots after crew.lua import. */
+  refreshCrewSnapshots() {
+    this._originalMembers = CREW_MEMBERS.map(m => ({ ...m }));
+    this._originalRoutes = CREW_ROUTES.map(r => {
+      const clone = { ...r };
+      if (r.points) clone.points = r.points.map(p => ({ ...p }));
+      return clone;
+    });
   }
 
   moveWaypoint(routeIdx, pointIdx, x, y) {

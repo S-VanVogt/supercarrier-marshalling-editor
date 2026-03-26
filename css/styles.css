@@ -302,6 +302,22 @@ button:hover { background: #f1efe8; }
 .route-label-input:hover { border-bottom-color: #b4b2a9; }
 .route-label-input:focus { border-bottom-color: #888780; background: #f9f8f5; }
 
+.crew-section { margin-top: 8px; }
+.crew-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 4px;
+  border-bottom: 0.5px solid #e8e6df;
+  margin-bottom: 4px;
+}
+.crew-section-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #5f5e5a;
+  flex: 1;
+}
+
 .route-edit-btn {
   font-size: 12px;
   padding: 1px 6px;
