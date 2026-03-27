@@ -12,3 +12,4 @@ const renderer = new Renderer(canvas, viewport);
 const ui       = new UI(viewport, renderer, routeState);
 
 ui.boot();
+window.__vp = viewport;

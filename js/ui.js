@@ -9,7 +9,7 @@ import { downloadPatchedLua, parseTakeoffRoutes } from './lua-patcher.js';
 import { parseCrewLua } from './crew-lua-parser.js';
 import { replaceCrewMembers } from './crew-data.js';
 import { CREW_ROUTES, replaceCrewRoutes } from './crew-routes-data.js';
-import { replaceTaskData } from './takeoff-tasks-data.js';
+import { replaceTaskData, TAKEOFF_TASKS, PARKING_TASKS } from './takeoff-tasks-data.js';
 import { patchCrewLua, downloadPatchedCrewLua } from './crew-lua-patcher.js';
 
 export class UI {
@@ -59,9 +59,10 @@ export class UI {
     // Wheel — heading rotation in crew edit mode, otherwise zoom
     this.canvas.addEventListener('wheel', e => {
       e.preventDefault();
-      if (this.rs.crewEditMode && this.rs.hoveredCrewIdx >= 0) {
+      if (this.rs.crewEditMode && this.rs.hoveredCrewIdx >= 0 && this.rs.hoveredCrewType
+          && this.rs.hoveredCrewIdx === this.rs.selectedCrewIdx && this.rs.hoveredCrewType === this.rs.selectedCrewType) {
         const delta = e.deltaY < 0 ? 5 : -5;
-        this.rs.rotateCrewMember(this.rs.hoveredCrewIdx, delta);
+        this.rs.rotateCrewMember(this.rs.hoveredCrewIdx, this.rs.hoveredCrewType, delta, this.rs.hoveredCrewPointIdx);
       } else {
         const w = this._canvasWorld(e);
         const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
@@ -133,21 +134,17 @@ export class UI {
       downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, headerComment);
     });
 
-    // Crew edit mode buttons
-    document.getElementById('btn-edit-idle-crew').addEventListener('click', () => {
-      if (this.rs.crewEditMode === 'idle') {
-        this.rs.exitCrewEdit();
-      } else {
-        this.rs.enterCrewEdit('idle');
-      }
-    });
-    document.getElementById('btn-edit-active-crew').addEventListener('click', () => {
-      if (this.rs.crewEditMode === 'active') {
-        this.rs.exitCrewEdit();
-      } else {
-        this.rs.enterCrewEdit('active');
-      }
-    });
+    // Crew edit mode button (optional, may not exist)
+    const crewEditBtn = document.getElementById('btn-edit-crew');
+    if (crewEditBtn) {
+      crewEditBtn.addEventListener('click', () => {
+        if (this.rs.crewEditMode) {
+          this.rs.exitCrewEdit();
+        } else {
+          this.rs.enterCrewEdit();
+        }
+      });
+    }
 
     // Route global toggles
     document.getElementById('takeoff-global').addEventListener('change', e => {
@@ -162,7 +159,11 @@ export class UI {
         if (this.rs.landingVisible) this.rs.toggleLandingGlobal();
       }
     });
-    document.getElementById('crew-global').addEventListener('change', e => {
+    document.getElementById('crew-idle-global').addEventListener('change', e => {
+      this.rs.setAllCrew(e.target.checked);
+    });
+    document.getElementById('crew-active-global').addEventListener('change', e => {
+      // Active "show all" controls visibility of all crew (same underlying data)
       this.rs.setAllCrew(e.target.checked);
     });
 
@@ -187,8 +188,49 @@ export class UI {
     this._buildLandingRows(lList);
 
     // Crew member rows
+    this._buildCrewRefMaps();
     this._rebuildCrewIdleList();
     this._rebuildCrewActiveList();
+  }
+
+  /** Build maps: memberId → Set of takeoff/landing task indices, routeId → same. */
+  _buildCrewRefMaps() {
+    // member → { takeoff: Set, landing: Set }
+    const memberRefs = new Map();
+    // route → { takeoff: Set, landing: Set }
+    const routeRefs = new Map();
+
+    const ensure = (map, id) => {
+      if (!map.has(id)) map.set(id, { takeoff: new Set(), landing: new Set() });
+      return map.get(id);
+    };
+
+    TAKEOFF_TASKS.forEach((task, ti) => {
+      ensure(memberRefs, task.brownId).takeoff.add(ti + 1);
+      ensure(routeRefs, task.brownRouteId).takeoff.add(ti + 1);
+      for (const step of task.steps) {
+        ensure(memberRefs, step.memberId).takeoff.add(ti + 1);
+        if (step.routeId >= 0) ensure(routeRefs, step.routeId).takeoff.add(ti + 1);
+      }
+    });
+
+    PARKING_TASKS.forEach((task, ti) => {
+      for (const step of task.steps) {
+        ensure(memberRefs, step.memberId).landing.add(ti + 1);
+        if (step.routeId >= 0) ensure(routeRefs, step.routeId).landing.add(ti + 1);
+      }
+    });
+
+    this._memberRefs = memberRefs;
+    this._routeRefs = routeRefs;
+  }
+
+  _crewRefLabel(refs) {
+    if (!refs) return '';
+    const parts = [];
+    if (refs.takeoff.size > 0) parts.push([...refs.takeoff].sort((a, b) => a - b).map(n => `T${n}`).join(' '));
+    if (refs.landing.size > 0) parts.push([...refs.landing].sort((a, b) => a - b).map(n => `L${n}`).join(' '));
+    return parts.join(' ');
   }
 
   _rebuildCrewIdleList() {
@@ -199,14 +241,21 @@ export class UI {
       const pal = LIVERY_COLOURS[m.livery] || LIVERY_COLOURS.yellow;
       const row = document.createElement('div');
       row.className = 'route-row';
+      const refLabel = this._crewRefLabel(this._memberRefs.get(i));
       row.innerHTML = `
         <span class="route-color-dot" style="background:${pal.fill}"></span>
         <input type="checkbox" checked data-ci="${i}">
-        <span class="route-label">${m.name}</span>
+        <span class="route-label">${i}: [${i + 1}] ${m.name}</span>
+        <span class="crew-ref-tags">${refLabel}</span>
         <button class="route-revert-btn" data-ci="${i}" title="Revert to original" disabled>Revert</button>
       `;
       row.querySelector('input[type="checkbox"]').addEventListener('change', () => {
         this.rs.toggleCrewMember(i);
+      });
+      row.querySelector('.route-label').addEventListener('click', () => {
+        if (!this.rs.crewEditMode) this.rs.enterCrewEdit();
+        this.rs.selectCrewMember(i, 'idle', -1);
+        this.renderList();
       });
       row.querySelector('.route-revert-btn').addEventListener('click', () => {
         this.rs.revertCrewMember(i);
@@ -222,11 +271,18 @@ export class UI {
       const r = CREW_ROUTES[i];
       const row = document.createElement('div');
       row.className = 'route-row';
+      const refLabel = this._crewRefLabel(this._routeRefs.get(i));
       row.innerHTML = `
         <span class="route-color-dot" style="background:#999"></span>
-        <span class="route-label">${i}: ${r.name}</span>
+        <span class="route-label">${i}: [${i + 1}] ${r.name}</span>
+        <span class="crew-ref-tags">${refLabel}</span>
         <button class="route-revert-btn" data-cri="${i}" title="Revert to original" disabled>Revert</button>
       `;
+      row.querySelector('.route-label').addEventListener('click', () => {
+        if (!this.rs.crewEditMode) this.rs.enterCrewEdit();
+        this.rs.selectCrewMember(i, 'active', -1);
+        this.renderList();
+      });
       row.querySelector('.route-revert-btn').addEventListener('click', () => {
         this.rs.revertCrewRoute(i);
       });
@@ -278,7 +334,7 @@ export class UI {
       row.dataset.landingRoute = i;
       row.innerHTML = `
         <span class="route-color-dot" style="background:${color}"></span>
-        <input type="checkbox" checked data-li="${i}">
+        <input type="checkbox" ${this.rs.landingRouteVisible[i] ? 'checked' : ''} data-li="${i}">
         <input class="route-label-input" type="text" value="${route.id}. ${route.label}" data-li="${i}">
         <button class="route-edit-btn" data-li="${i}" title="Edit route on canvas">Edit</button>
         <button class="route-revert-btn" data-li="${i}" title="Revert to original" disabled>Revert</button>
@@ -335,6 +391,7 @@ export class UI {
     if (this.rs.crewEditMode) this.rs.exitCrewEdit();
 
     // Rebuild crew panels
+    this._buildCrewRefMaps();
     this._rebuildCrewIdleList();
     this._rebuildCrewActiveList();
 
@@ -387,25 +444,119 @@ export class UI {
       if (cb) cb.checked = this.rs.crewVisible[i];
       const revertBtn = idleRows[i].querySelector('.route-revert-btn');
       if (revertBtn) revertBtn.disabled = !this.rs.isCrewMemberModified(i);
-      const isSelected = this.rs.crewEditMode === 'idle' && this.rs.selectedCrewIdx === i;
+      const isSelected = this.rs.crewEditMode && this.rs.selectedCrewType === 'idle' && this.rs.selectedCrewIdx === i;
       idleRows[i].classList.toggle('selected', isSelected);
     }
-    document.getElementById('crew-global').checked = this.rs.allCrewVisible();
+    const allVis = this.rs.allCrewVisible();
+    document.getElementById('crew-idle-global').checked = allVis;
+    document.getElementById('crew-active-global').checked = allVis;
 
     // Crew active sync
     const activeRows = document.querySelectorAll('#crew-active-list .route-row');
     for (let i = 0; i < activeRows.length; i++) {
       const revertBtn = activeRows[i].querySelector('.route-revert-btn');
       if (revertBtn) revertBtn.disabled = !this.rs.isCrewRouteModified(i);
-      const isSelected = this.rs.crewEditMode === 'active' && this.rs.selectedCrewIdx === i;
+      const isSelected = this.rs.crewEditMode && this.rs.selectedCrewType === 'active' && this.rs.selectedCrewIdx === i;
       activeRows[i].classList.toggle('selected', isSelected);
     }
 
-    // Crew edit buttons
-    const idleBtn = document.getElementById('btn-edit-idle-crew');
-    const activeBtn = document.getElementById('btn-edit-active-crew');
-    if (idleBtn) idleBtn.classList.toggle('active', this.rs.crewEditMode === 'idle');
-    if (activeBtn) activeBtn.classList.toggle('active', this.rs.crewEditMode === 'active');
+    // Crew edit button (if present)
+    const crewEditBtn2 = document.getElementById('btn-edit-crew');
+    if (crewEditBtn2) crewEditBtn2.classList.toggle('active', !!this.rs.crewEditMode);
+
+    // Crew toolbar fields
+    this._syncCrewToolbarFields();
+  }
+
+  _syncCrewToolbarFields() {
+    const label = document.getElementById('crew-edit-label');
+    const fieldsDiv = document.getElementById('crew-edit-fields');
+    const progressBar = document.getElementById('progress-bar');
+    const crewBar = document.getElementById('crew-edit-bar');
+    if (!label || !fieldsDiv || !progressBar || !crewBar) return;
+
+    const rs = this.rs;
+    const showCrewBar = !!rs.crewEditMode;
+    progressBar.style.display = showCrewBar ? 'none' : '';
+    crewBar.style.display = showCrewBar ? '' : 'none';
+
+    if (!rs.crewEditMode || rs.selectedCrewIdx < 0 || !rs.selectedCrewType) {
+      label.textContent = 'No crew selected';
+      fieldsDiv.innerHTML = '';
+      fieldsDiv.dataset.key = '';
+      return;
+    }
+
+    if (rs.selectedCrewType === 'idle') {
+      const m = CREW_MEMBERS[rs.selectedCrewIdx];
+      if (!m) return;
+      label.textContent = `Idle #${rs.selectedCrewIdx}: ${m.name}`;
+      // Only rebuild inputs if they don't already match (avoid losing focus)
+      if (fieldsDiv.dataset.key !== `idle-${rs.selectedCrewIdx}`) {
+        fieldsDiv.dataset.key = `idle-${rs.selectedCrewIdx}`;
+        fieldsDiv.innerHTML = `
+          <label>x</label><input type="number" value="${m.x.toFixed(2)}" step="0.1" data-k="x">
+          <label>y</label><input type="number" value="${m.y.toFixed(2)}" step="0.1" data-k="y">
+          <label>hdg°</label><input type="number" value="${m.hdg.toFixed(1)}" step="5" data-k="hdg">
+        `;
+        for (const inp of fieldsDiv.querySelectorAll('input')) {
+          inp.addEventListener('input', () => {
+            const val = parseFloat(inp.value);
+            if (isNaN(val)) return;
+            const k = inp.dataset.k;
+            if (k === 'x') { m.x = val; rs._notify(); }
+            else if (k === 'y') { m.y = val; rs._notify(); }
+            else if (k === 'hdg') { m.hdg = val; rs._notify(); }
+          });
+        }
+      } else {
+        // Update values without rebuilding
+        const inputs = fieldsDiv.querySelectorAll('input');
+        if (inputs[0] && document.activeElement !== inputs[0]) inputs[0].value = m.x.toFixed(2);
+        if (inputs[1] && document.activeElement !== inputs[1]) inputs[1].value = m.y.toFixed(2);
+        if (inputs[2]) inputs[2].value = m.hdg.toFixed(1);
+      }
+    } else if (rs.selectedCrewType === 'active') {
+      const r = CREW_ROUTES[rs.selectedCrewIdx];
+      if (!r) return;
+      const pts = r.points || [{ x: r.x, y: r.y, angle: r.angle }];
+      const ptIdx = rs.selectedCrewPointIdx >= 0 ? rs.selectedCrewPointIdx : 0;
+      const p = pts[ptIdx];
+      if (!p) return;
+      const ptLabel = pts.length > 1 ? `Active #${rs.selectedCrewIdx}.${ptIdx}` : `Active #${rs.selectedCrewIdx}`;
+      label.textContent = `${ptLabel}: ${r.name}`;
+      const key = `active-${rs.selectedCrewIdx}-${ptIdx}`;
+      if (fieldsDiv.dataset.key !== key) {
+        fieldsDiv.dataset.key = key;
+        const angleDeg = (p.angle * 180 / Math.PI).toFixed(1);
+        fieldsDiv.innerHTML = `
+          <label>x</label><input type="number" value="${p.x.toFixed(2)}" step="0.1" data-k="x">
+          <label>y</label><input type="number" value="${p.y.toFixed(2)}" step="0.1" data-k="y">
+          <label>angle°</label><input type="number" value="${angleDeg}" step="5" data-k="angle">
+        `;
+        for (const inp of fieldsDiv.querySelectorAll('input')) {
+          inp.addEventListener('input', () => {
+            const val = parseFloat(inp.value);
+            if (isNaN(val)) return;
+            const k = inp.dataset.k;
+            if (k === 'x') { p.x = val; if (!r.points) r.x = val; rs._notify(); }
+            else if (k === 'y') { p.y = val; if (!r.points) r.y = val; rs._notify(); }
+            else if (k === 'angle') {
+              const rad = val * Math.PI / 180;
+              p.angle = rad;
+              if (!r.points) r.angle = rad;
+              rs._notify();
+            }
+          });
+        }
+      } else {
+        const inputs = fieldsDiv.querySelectorAll('input');
+        const angleDeg = (p.angle * 180 / Math.PI).toFixed(1);
+        if (inputs[0] && document.activeElement !== inputs[0]) inputs[0].value = p.x.toFixed(2);
+        if (inputs[1] && document.activeElement !== inputs[1]) inputs[1].value = p.y.toFixed(2);
+        if (inputs[2]) inputs[2].value = angleDeg;
+      }
+    }
   }
 
   // ── Canvas pointer handling ─────────────────────────────────────────────
@@ -425,10 +576,25 @@ export class UI {
     return (this.viewport.width / this.canvas.width) * 8;
   }
 
-  _isPanButton(e) {
-    if ((this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) || this.rs.crewEditMode) {
-      return e.button === 1 || (e.button === 0 && e.shiftKey);
+  /** Custom cursor: crosshair with circle, cached as data URI. */
+  _circleCrosshairCursor() {
+    if (!this._ccCursor) {
+      const sz = 24, c = sz / 2, r = 8, gap = 3;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sz}" height="${sz}">` +
+        `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="black" stroke-width="1.5"/>` +
+        `<line x1="${c}" y1="0" x2="${c}" y2="${c - r - gap}" stroke="black" stroke-width="1.2"/>` +
+        `<line x1="${c}" y1="${c + r + gap}" x2="${c}" y2="${sz}" stroke="black" stroke-width="1.2"/>` +
+        `<line x1="0" y1="${c}" x2="${c - r - gap}" y2="${c}" stroke="black" stroke-width="1.2"/>` +
+        `<line x1="${c + r + gap}" y1="${c}" x2="${sz}" y2="${c}" stroke="black" stroke-width="1.2"/>` +
+        `</svg>`;
+      this._ccCursor = `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${c} ${c}, crosshair`;
     }
+    return this._ccCursor;
+  }
+
+  _isPanButton(e) {
+    // Right-click is for adding waypoints when in route edit mode, not panning
+    if (e.button === 2 && this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) return false;
     return e.button === 1 || e.button === 2 || (e.button === 0 && e.shiftKey);
   }
 
@@ -439,18 +605,163 @@ export class UI {
       this.canvas.setPointerCapture(e.pointerId);
       return;
     }
-    // Crew edit mode
-    if (this.rs.crewEditMode && e.button === 0) {
-      this._onCrewPointerDown(e);
+    // Right-click to add waypoints in route edit mode
+    if (e.button === 2 && this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
+      this._onRouteRightClick(e);
       return;
     }
-    if (this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
-      if (e.button === 2) {
-        this._onRouteRightClick(e);
-      } else {
-        this._onRoutePointerDown(e);
+    if (e.button !== 0) return;
+
+    const w = this._canvasWorld(e);
+
+    // Crew edit mode: handle crew interaction, or fall through to switch
+    if (this.rs.crewEditMode) {
+      const crewHit = this._crewHitTest(w);
+      if (crewHit.idx >= 0) {
+        this.rs.selectCrewMember(crewHit.idx, crewHit.type, crewHit.pointIdx);
+        this.rs.draggingCrew = true;
+        this.canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      // Miss crew — try route segment to switch mode
+      const routeHit = this._routeHitTest(w);
+      if (routeHit) {
+        this.rs.exitCrewEdit();
+        this.rs.selectRoute(routeHit.type, routeHit.idx);
+        this.renderList();
+        return;
+      }
+      // Miss everything — exit crew edit mode and pan
+      this.rs.exitCrewEdit();
+    }
+
+    // Route edit mode: handle waypoint drag, right-click, or fall through to switch
+    else if (this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
+      // Try waypoint drag first
+      const pts = this._selectedPoints();
+      if (pts) {
+        const hr = this._hitRadius();
+        let best = -1, bestD = Infinity;
+        for (let j = 0; j < pts.length; j++) {
+          const dx = pts[j].x - w.x, dy = pts[j].y - w.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < hr && d < bestD) { best = j; bestD = d; }
+        }
+        if (best >= 0) {
+          this.rs.draggingPoint = best;
+          this.rs.selectedWaypoint = best;
+          this.canvas.setPointerCapture(e.pointerId);
+          this.renderList();
+          return;
+        }
+      }
+      // Miss waypoint — try crew dot to switch mode
+      const crewHit = this._crewHitTest(w);
+      if (crewHit.idx >= 0) {
+        this.rs.deselectRoute();
+        this.rs.enterCrewEdit();
+        this.rs.selectCrewMember(crewHit.idx, crewHit.type, crewHit.pointIdx);
+        this.rs.draggingCrew = true;
+        this.canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      // Try another route segment to switch route
+      const routeHit = this._routeHitTest(w);
+      if (routeHit) {
+        this.rs.selectRoute(routeHit.type, routeHit.idx);
+        this.renderList();
+        return;
       }
     }
+
+    // No edit mode — click-to-enter: test crew dots first, then route segments
+    else {
+      const crewHit = this._crewHitTest(w);
+      if (crewHit.idx >= 0) {
+        this.rs.enterCrewEdit();
+        this.rs.selectCrewMember(crewHit.idx, crewHit.type, crewHit.pointIdx);
+        this.rs.draggingCrew = true;
+        this.canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      const routeHit = this._routeHitTest(w);
+      if (routeHit) {
+        this.rs.selectRoute(routeHit.type, routeHit.idx);
+        this.renderList();
+        return;
+      }
+    }
+
+    // Nothing hit — start panning with left click
+    this._panning = true;
+    this._panLast = w;
+    this.canvas.setPointerCapture(e.pointerId);
+  }
+
+  /** Hit-test all visible route segments. Returns { type, idx } or null. */
+  _routeHitTestAll(w) {
+    const hr = this._hitRadius() * 2.5;
+    const hits = [];
+
+    // Takeoff routes
+    for (let i = 0; i < this.rs.takeoffRoutes.length; i++) {
+      if (!this.rs.takeoffRouteVisible[i]) continue;
+      const pts = this.rs.takeoffRoutes[i].points;
+      let minD = Infinity;
+      for (let j = 0; j < pts.length - 1; j++) {
+        const d = this._distToSegment(w, pts[j], pts[j + 1]);
+        if (d < minD) minD = d;
+      }
+      if (minD < hr) hits.push({ type: 'takeoff', idx: i, dist: minD });
+    }
+
+    // Landing routes
+    if (this.rs.landingVisible) {
+      for (let i = 0; i < this.rs.landingRoutes.length; i++) {
+        if (!this.rs.landingRouteVisible[i]) continue;
+        const pts = this.rs.landingRoutes[i].points;
+        let minD = Infinity;
+        for (let j = 0; j < pts.length - 1; j++) {
+          const d = this._distToSegment(w, pts[j], pts[j + 1]);
+          if (d < minD) minD = d;
+        }
+        if (minD < hr) hits.push({ type: 'landing', idx: i, dist: minD });
+      }
+    }
+
+    // Sort by distance (closest first)
+    hits.sort((a, b) => a.dist - b.dist);
+    return hits;
+  }
+
+  _routeHitTest(w) {
+    const hits = this._routeHitTestAll(w);
+    if (hits.length === 0) return null;
+
+    // Cycling: if clicking near the same spot, advance to next hit
+    const SAME_SPOT_THRESHOLD = 5; // world units
+    const now = Date.now();
+    if (this._lastRouteHitPos
+        && Math.abs(w.x - this._lastRouteHitPos.x) < SAME_SPOT_THRESHOLD
+        && Math.abs(w.y - this._lastRouteHitPos.y) < SAME_SPOT_THRESHOLD
+        && (now - (this._lastRouteHitTime || 0)) < 2000) {
+      // Find current selection in hits
+      const curIdx = hits.findIndex(h =>
+        h.type === this._lastRouteHitResult?.type && h.idx === this._lastRouteHitResult?.idx);
+      const nextIdx = (curIdx + 1) % hits.length;
+      const pick = hits[nextIdx];
+      this._lastRouteHitPos = w;
+      this._lastRouteHitTime = now;
+      this._lastRouteHitResult = pick;
+      return pick;
+    }
+
+    // New spot — pick closest
+    const pick = hits[0];
+    this._lastRouteHitPos = w;
+    this._lastRouteHitTime = now;
+    this._lastRouteHitResult = pick;
+    return pick;
   }
 
   _onPointerMove(e) {
@@ -468,7 +779,17 @@ export class UI {
     }
     if (this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
       this._onRoutePointerMove(e);
+      return;
     }
+    // No edit mode: show cursor hint over clickable elements
+    const w = this._canvasWorld(e);
+    const crewHit = this._crewHitTest(w);
+    if (crewHit.idx >= 0) {
+      this.canvas.style.cursor = this._circleCrosshairCursor();
+      return;
+    }
+    const routeHits = this._routeHitTestAll(w);
+    this.canvas.style.cursor = routeHits.length > 0 ? 'pointer' : 'crosshair';
   }
 
   _onPointerUp(e) {
@@ -542,49 +863,72 @@ export class UI {
 
   _onRoutePointerMove(e) {
     const ri = this.rs.selectedRoute;
-    if (ri < 0 || this.rs.draggingPoint < 0) return;
+    if (ri < 0) return;
     const w = this._canvasWorld(e);
-    this.rs.moveWaypoint(ri, this.rs.draggingPoint, +w.x.toFixed(2), +w.y.toFixed(2));
+    // Dragging a waypoint
+    if (this.rs.draggingPoint >= 0) {
+      this.rs.moveWaypoint(ri, this.rs.draggingPoint, +w.x.toFixed(2), +w.y.toFixed(2));
+      return;
+    }
+    // Hover cursor over waypoints
+    const pts = this._selectedPoints();
+    if (pts) {
+      const hr = this._hitRadius();
+      let overPoint = false;
+      for (let j = 0; j < pts.length; j++) {
+        const dx = pts[j].x - w.x, dy = pts[j].y - w.y;
+        if (Math.sqrt(dx * dx + dy * dy) < hr) { overPoint = true; break; }
+      }
+      this.canvas.style.cursor = overPoint ? this._circleCrosshairCursor() : 'crosshair';
+    }
   }
 
   // ── Crew pointer handlers ────────────────────────────────────────────
+  /** Hit-test both idle members and active routes. Returns { idx, type, pointIdx }. */
   _crewHitTest(w) {
     const hr = this._hitRadius();
-    if (this.rs.crewEditMode === 'idle') {
-      let best = -1, bestD = Infinity;
-      for (let i = 0; i < CREW_MEMBERS.length; i++) {
-        const m = CREW_MEMBERS[i];
-        const dx = m.x - w.x, dy = m.y - w.y;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < hr && d < bestD) { best = i; bestD = d; }
-      }
-      return best;
-    } else if (this.rs.crewEditMode === 'active') {
-      let best = -1, bestD = Infinity;
-      for (let i = 0; i < CREW_ROUTES.length; i++) {
-        const r = CREW_ROUTES[i];
-        // Test last point for multi-point, or the single position
-        const pos = (r.points && r.points.length > 0) ? r.points[r.points.length - 1] : r;
-        const dx = pos.x - w.x, dy = pos.y - w.y;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < hr && d < bestD) { best = i; bestD = d; }
-      }
-      return best;
+    let bestIdx = -1, bestType = null, bestPointIdx = -1, bestD = Infinity;
+
+    // Test idle members (skip hidden)
+    for (let i = 0; i < CREW_MEMBERS.length; i++) {
+      if (this.rs && !this.rs.crewVisible[i]) continue;
+      const m = CREW_MEMBERS[i];
+      const dx = m.x - w.x, dy = m.y - w.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < hr && d < bestD) { bestIdx = i; bestType = 'idle'; bestPointIdx = -1; bestD = d; }
     }
-    return -1;
+
+    // Test active routes (all points of multi-point routes)
+    for (let i = 0; i < CREW_ROUTES.length; i++) {
+      const r = CREW_ROUTES[i];
+      if (r.points && r.points.length > 0) {
+        for (let j = 0; j < r.points.length; j++) {
+          const dx = r.points[j].x - w.x, dy = r.points[j].y - w.y;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          if (d < hr && d < bestD) { bestIdx = i; bestType = 'active'; bestPointIdx = j; bestD = d; }
+        }
+      } else {
+        const dx = r.x - w.x, dy = r.y - w.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < hr && d < bestD) { bestIdx = i; bestType = 'active'; bestPointIdx = -1; bestD = d; }
+      }
+    }
+
+    return { idx: bestIdx, type: bestType, pointIdx: bestPointIdx };
   }
 
   _onCrewPointerDown(e) {
     const w = this._canvasWorld(e);
     const hit = this._crewHitTest(w);
-    if (hit >= 0) {
-      this.rs.selectedCrewIdx = hit;
+    if (hit.idx >= 0) {
+      this.rs.selectCrewMember(hit.idx, hit.type, hit.pointIdx);
       this.rs.draggingCrew = true;
       this.canvas.setPointerCapture(e.pointerId);
-      this.rs._notify();
     } else {
       if (this.rs.selectedCrewIdx >= 0) {
+        this.rs.selectedCrewType = null;
         this.rs.selectedCrewIdx = -1;
+        this.rs.selectedCrewPointIdx = -1;
         this.rs._notify();
       }
     }
@@ -593,15 +937,17 @@ export class UI {
   _onCrewPointerMove(e) {
     const w = this._canvasWorld(e);
     // Dragging
-    if (this.rs.draggingCrew && this.rs.selectedCrewIdx >= 0) {
-      this.rs.moveCrewMember(this.rs.selectedCrewIdx, +w.x.toFixed(2), +w.y.toFixed(2));
+    if (this.rs.draggingCrew && this.rs.selectedCrewIdx >= 0 && this.rs.selectedCrewType) {
+      this.rs.moveCrewMember(this.rs.selectedCrewIdx, this.rs.selectedCrewType, +w.x.toFixed(2), +w.y.toFixed(2), this.rs.selectedCrewPointIdx);
       return;
     }
     // Hover detection for scroll-wheel rotation
     const hit = this._crewHitTest(w);
-    if (hit !== this.rs.hoveredCrewIdx) {
-      this.rs.hoveredCrewIdx = hit;
-      this.canvas.style.cursor = hit >= 0 ? 'grab' : 'crosshair';
+    if (hit.idx !== this.rs.hoveredCrewIdx || hit.type !== this.rs.hoveredCrewType || hit.pointIdx !== this.rs.hoveredCrewPointIdx) {
+      this.rs.hoveredCrewIdx = hit.idx;
+      this.rs.hoveredCrewType = hit.type;
+      this.rs.hoveredCrewPointIdx = hit.pointIdx;
+      this.canvas.style.cursor = hit.idx >= 0 ? this._circleCrosshairCursor() : 'crosshair';
     }
   }
 
@@ -610,79 +956,6 @@ export class UI {
     this.ptRows.innerHTML = '';
     const title = document.getElementById('pt-list-title');
     const header = document.querySelector('.pt-header');
-
-    // ── Crew edit mode ──
-    if (this.rs.crewEditMode && this.rs.selectedCrewIdx >= 0) {
-      if (this.rs.crewEditMode === 'idle') {
-        const m = CREW_MEMBERS[this.rs.selectedCrewIdx];
-        if (!m) return;
-        title.textContent = `Crew: ${m.name}`;
-        header.innerHTML = `<span>#</span><span>x</span><span>y</span><span>hdg (°)</span><span></span>`;
-        header.style.gridTemplateColumns = '28px 1fr 1fr 80px 28px';
-
-        const row = document.createElement('div');
-        row.className = 'pt-row';
-        row.style.gridTemplateColumns = '28px 1fr 1fr 80px 28px';
-        row.innerHTML = `
-          <span class="pt-idx">0</span>
-          <input type="number" value="${m.x.toFixed(2)}" step="0.1" data-k="x">
-          <input type="number" value="${m.y.toFixed(2)}" step="0.1" data-k="y">
-          <input type="number" value="${m.hdg.toFixed(1)}" step="5" data-k="hdg" style="width:100%">
-          <span></span>
-        `;
-        for (const inp of row.querySelectorAll('input')) {
-          inp.addEventListener('input', () => {
-            const val = parseFloat(inp.value);
-            if (isNaN(val)) return;
-            const k = inp.dataset.k;
-            if (k === 'x') { m.x = val; this.rs._notify(); }
-            else if (k === 'y') { m.y = val; this.rs._notify(); }
-            else if (k === 'hdg') { m.hdg = val; this.rs._notify(); }
-          });
-        }
-        this.ptRows.appendChild(row);
-      } else if (this.rs.crewEditMode === 'active') {
-        const r = CREW_ROUTES[this.rs.selectedCrewIdx];
-        if (!r) return;
-        title.textContent = `Route: ${r.name}`;
-        header.innerHTML = `<span>#</span><span>x</span><span>y</span><span>angle (°)</span><span></span>`;
-        header.style.gridTemplateColumns = '28px 1fr 1fr 80px 28px';
-
-        const pts = r.points || [{ x: r.x, y: r.y, angle: r.angle }];
-        pts.forEach((p, i) => {
-          const row = document.createElement('div');
-          row.className = 'pt-row';
-          row.style.gridTemplateColumns = '28px 1fr 1fr 80px 28px';
-          const angleDeg = (p.angle * 180 / Math.PI).toFixed(1);
-          row.innerHTML = `
-            <span class="pt-idx">${i}</span>
-            <input type="number" value="${p.x.toFixed(2)}" step="0.1" data-i="${i}" data-k="x">
-            <input type="number" value="${p.y.toFixed(2)}" step="0.1" data-i="${i}" data-k="y">
-            <input type="number" value="${angleDeg}" step="5" data-i="${i}" data-k="angle" style="width:100%">
-            <span></span>
-          `;
-          for (const inp of row.querySelectorAll('input')) {
-            inp.addEventListener('input', () => {
-              const val = parseFloat(inp.value);
-              if (isNaN(val)) return;
-              const k = inp.dataset.k;
-              const idx = +inp.dataset.i;
-              const pt = pts[idx];
-              if (k === 'x') { pt.x = val; if (!r.points) r.x = val; this.rs._notify(); }
-              else if (k === 'y') { pt.y = val; if (!r.points) r.y = val; this.rs._notify(); }
-              else if (k === 'angle') {
-                const rad = val * Math.PI / 180;
-                pt.angle = rad;
-                if (!r.points) r.angle = rad;
-                this.rs._notify();
-              }
-            });
-          }
-          this.ptRows.appendChild(row);
-        });
-      }
-      return;
-    }
 
     // ── Route edit mode ──
     const ri = this.rs.selectedRoute;
@@ -705,7 +978,7 @@ export class UI {
 
     points.forEach((p, i) => {
       const row = document.createElement('div');
-      row.className = 'pt-row';
+      row.className = 'pt-row' + (i === this.rs.selectedWaypoint ? ' selected' : '');
       row.style.gridTemplateColumns = '28px 1fr 1fr 60px 28px';
       row.innerHTML = `
         <span class="pt-idx">${i}</span>
@@ -764,10 +1037,29 @@ export class UI {
     if (route) {
       const rpt = polylinePoint(route.points, this.rs.t);
       if (rpt) {
-        this.coordout.textContent = `x: ${rpt.x.toFixed(2)}, y: ${rpt.y.toFixed(2)}`;
+        this.coordout.textContent = `x: ${rpt.x.toFixed(2)}, y: ${rpt.y.toFixed(2)}, v: ${rpt.v.toFixed(2)}`;
       }
     } else {
       this.coordout.textContent = 'x: \u2014, y: \u2014';
+    }
+
+    // Update crew bar coord display
+    const crewCoord = document.getElementById('coordout-crew');
+    if (crewCoord && this.rs.crewEditMode && this.rs.selectedCrewIdx >= 0 && this.rs.selectedCrewType) {
+      if (this.rs.selectedCrewType === 'idle') {
+        const m = CREW_MEMBERS[this.rs.selectedCrewIdx];
+        if (m) crewCoord.textContent = `x: ${m.x.toFixed(2)}, y: ${m.y.toFixed(2)}`;
+      } else {
+        const r = CREW_ROUTES[this.rs.selectedCrewIdx];
+        if (r) {
+          const pts = r.points || [r];
+          const pi = this.rs.selectedCrewPointIdx >= 0 ? this.rs.selectedCrewPointIdx : 0;
+          const p = pts[pi];
+          if (p) crewCoord.textContent = `x: ${p.x.toFixed(2)}, y: ${p.y.toFixed(2)}`;
+        }
+      }
+    } else if (crewCoord) {
+      crewCoord.textContent = 'x: \u2014, y: \u2014';
     }
   }
 

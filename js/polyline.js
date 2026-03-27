@@ -36,16 +36,18 @@ export function polylinePoint(points, t) {
   for (let i = 0; i < segs.length; i++) {
     if (acc + segs[i] >= target) {
       const frac = segs[i] === 0 ? 0 : (target - acc) / segs[i];
+      const v0 = points[i].v ?? 1, v1 = points[i + 1].v ?? 1;
       return {
         x: points[i].x + frac * (points[i + 1].x - points[i].x),
         y: points[i].y + frac * (points[i + 1].y - points[i].y),
+        v: v0 + frac * (v1 - v0),
         segIndex: i,
       };
     }
     acc += segs[i];
   }
   const last = points[points.length - 1];
-  return { x: last.x, y: last.y, segIndex: points.length - 2 };
+  return { x: last.x, y: last.y, v: last.v ?? 1, segIndex: points.length - 2 };
 }
 
 /**

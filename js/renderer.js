@@ -248,34 +248,62 @@ export class Renderer {
       ctx.stroke();
 
       // Selection ring (crew idle edit mode)
-      if (rs && rs.crewEditMode === 'idle' && rs.selectedCrewIdx === mi) {
+      if (rs && rs.crewEditMode && rs.selectedCrewType === 'idle' && rs.selectedCrewIdx === mi) {
+        const ringR = r + 10;
         ctx.beginPath();
-        ctx.arc(c.x, c.y, r + 5, 0, Math.PI * 2);
+        ctx.arc(c.x, c.y, ringR, 0, Math.PI * 2);
         ctx.strokeStyle = pal.fill;
         ctx.lineWidth = 2;
         ctx.stroke();
+        // Angle tick on ring
+        const tickInner = ringR - 3;
+        const tickOuter = ringR + 5;
+        const tx1 = c.x + Math.cos(hdgRad) * tickInner;
+        const ty1 = c.y - Math.sin(hdgRad) * tickInner;
+        const tx2 = c.x + Math.cos(hdgRad) * tickOuter;
+        const ty2 = c.y - Math.sin(hdgRad) * tickOuter;
+        ctx.beginPath();
+        ctx.moveTo(tx1, ty1);
+        ctx.lineTo(tx2, ty2);
+        ctx.strokeStyle = pal.stroke;
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
       }
 
-      // label tag
+      // label tag — offset away from heading arrow to avoid masking it
       const label = m.name;
+      ctx.font = 'bold 10px monospace';
       const tw = ctx.measureText(label).width;
       const pad = 3;
-      const tagX = c.x + r + 3;
-      const tagY = c.y;
       const tagW = tw + pad * 2;
-      const tagH = 12;
+      const tagH = 13;
+
+      // Place label opposite the arrow: pick the side (above/below) that is
+      // farther from the arrow tip direction
+      const arrowDy = -Math.sin(hdgRad); // arrow y-direction in canvas (negative = up)
+      const below = arrowDy < 0; // arrow points up → place label below, and vice versa
+      const tagY = below ? c.y + r + 4 : c.y - r - 4 - tagH;
+      const tagX = c.x - tagW / 2; // centered on dot
 
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.strokeStyle = pal.stroke;
       ctx.lineWidth = 0.8;
       ctx.beginPath();
-      ctx.roundRect(tagX, tagY - tagH / 2, tagW, tagH, 2);
+      ctx.roundRect(tagX, tagY, tagW, tagH, 2);
       ctx.fill();
       ctx.stroke();
 
       ctx.fillStyle = pal.text;
-      ctx.textAlign = 'left';
-      ctx.fillText(label, tagX + pad, tagY + 0.5);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, c.x, tagY + tagH / 2);
+
+      // index number centered above/below name tag
+      const idxY = below ? tagY + tagH + 1 : tagY - 2;
+      ctx.fillStyle = pal.stroke;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = below ? 'top' : 'bottom';
+      ctx.fillText(`${mi}`, c.x, idxY);
     }
     ctx.restore();
   }
@@ -467,6 +495,14 @@ export class Renderer {
   }
 
   // ── Crew active (marshalling) positions ────────────────────────────────────
+  _drawIndexLabel(ctx, cx, cy, r, label, pal) {
+    ctx.font = 'bold 10px monospace';
+    ctx.fillStyle = pal.stroke || '#777';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, cx + r + 3, cy);
+  }
+
   _drawActivePoint(ctx, cx, cy, angle, pal, r) {
     // Dot
     ctx.beginPath();
@@ -501,7 +537,7 @@ export class Renderer {
     // Color only when takeoff routes are actually visible or being edited
     const anyTakeoffVisible = rs && rs.takeoffRouteVisible && rs.takeoffRouteVisible.some(Boolean);
     const editingTakeoff = rs && rs.selectedRouteType === 'takeoff' && rs.selectedRoute >= 0;
-    const editingActiveCrew = rs && rs.crewEditMode === 'active';
+    const editingActiveCrew = rs && rs.crewEditMode;
     const useColor = anyTakeoffVisible || editingTakeoff || editingActiveCrew;
 
     for (const link of CREW_ACTIVE_LINKS) {
@@ -531,6 +567,7 @@ export class Renderer {
         ctx.setLineDash([]);
 
         this._drawActivePoint(ctx, firstC.x, firstC.y, route.points[0].angle, pal, r);
+        this._drawIndexLabel(ctx, firstC.x, firstC.y, r, `${link.routeId}.0`, pal);
 
         // Lines between consecutive points + dots
         for (let j = 1; j < route.points.length; j++) {
@@ -547,17 +584,32 @@ export class Renderer {
           ctx.setLineDash([]);
 
           this._drawActivePoint(ctx, curC.x, curC.y, route.points[j].angle, pal, r);
+          this._drawIndexLabel(ctx, curC.x, curC.y, r, `${link.routeId}.${j}`, pal);
         }
 
         // Selection ring for multi-point active crew edit mode
-        if (rs && rs.crewEditMode === 'active' && rs.selectedCrewIdx === link.routeId) {
-          const lastPt = route.points[route.points.length - 1];
-          const lastC = this.wc(lastPt.x, lastPt.y);
-          ctx.beginPath();
-          ctx.arc(lastC.x, lastC.y, r + 5, 0, Math.PI * 2);
-          ctx.strokeStyle = pal.fill;
-          ctx.lineWidth = 2;
-          ctx.stroke();
+        if (rs && rs.crewEditMode && rs.selectedCrewType === 'active' && rs.selectedCrewIdx === link.routeId) {
+          const selPtIdx = rs.selectedCrewPointIdx >= 0 ? rs.selectedCrewPointIdx : route.points.length - 1;
+          const selPt = route.points[selPtIdx];
+          if (selPt) {
+            const selC = this.wc(selPt.x, selPt.y);
+            const ringR = r + 10;
+            const ang = selPt.angle ?? 0;
+            ctx.beginPath();
+            ctx.arc(selC.x, selC.y, ringR, 0, Math.PI * 2);
+            ctx.strokeStyle = pal.fill;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // Angle tick on ring
+            const tickInner = ringR - 3;
+            const tickOuter = ringR + 5;
+            ctx.beginPath();
+            ctx.moveTo(selC.x + Math.cos(ang) * tickInner, selC.y - Math.sin(ang) * tickInner);
+            ctx.lineTo(selC.x + Math.cos(ang) * tickOuter, selC.y - Math.sin(ang) * tickOuter);
+            ctx.strokeStyle = pal.stroke;
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+          }
         }
       } else {
         // Single-point route
@@ -576,13 +628,27 @@ export class Renderer {
         this._drawActivePoint(ctx, activeC.x, activeC.y, route.angle, pal, r);
 
         // Selection ring for active crew edit mode
-        if (rs && rs.crewEditMode === 'active' && rs.selectedCrewIdx === link.routeId) {
+        if (rs && rs.crewEditMode && rs.selectedCrewType === 'active' && rs.selectedCrewIdx === link.routeId) {
+          const ringR = r + 10;
+          const ang = route.angle ?? 0;
           ctx.beginPath();
-          ctx.arc(activeC.x, activeC.y, r + 5, 0, Math.PI * 2);
+          ctx.arc(activeC.x, activeC.y, ringR, 0, Math.PI * 2);
           ctx.strokeStyle = pal.fill;
           ctx.lineWidth = 2;
           ctx.stroke();
+          // Angle tick on ring
+          const tickInner = ringR - 3;
+          const tickOuter = ringR + 5;
+          ctx.beginPath();
+          ctx.moveTo(activeC.x + Math.cos(ang) * tickInner, activeC.y - Math.sin(ang) * tickInner);
+          ctx.lineTo(activeC.x + Math.cos(ang) * tickOuter, activeC.y - Math.sin(ang) * tickOuter);
+          ctx.strokeStyle = pal.stroke;
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
         }
+
+        // Route index label
+        this._drawIndexLabel(ctx, activeC.x, activeC.y, r, `${link.routeId}`, pal);
       }
     }
 
@@ -665,6 +731,40 @@ export class Renderer {
           ctx.lineTo(ax, ay);
           ctx.strokeStyle = 'rgba(140,140,140,0.4)';
           ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+
+      // Route index labels at each point
+      const labelPal = pal || { stroke: '#999' };
+      for (let j = 0; j < pts.length; j++) {
+        const lc = this.wc(pts[j].x, pts[j].y);
+        const lbl = pts.length > 1 ? `${link.routeId}.${j}` : `${link.routeId}`;
+        this._drawIndexLabel(ctx, lc.x, lc.y, r, lbl, labelPal);
+      }
+
+      // Selection ring for crew edit mode on unused routes
+      if (rs.crewEditMode && rs.selectedCrewType === 'active' && rs.selectedCrewIdx === link.routeId) {
+        const selPtIdx = rs.selectedCrewPointIdx >= 0 ? rs.selectedCrewPointIdx : pts.length - 1;
+        const selPt = pts[selPtIdx];
+        if (selPt) {
+          const selC = this.wc(selPt.x, selPt.y);
+          const ringR = r + 10;
+          const ang = selPt.angle ?? 0;
+          const ringPal = pal || { fill: '#999', stroke: '#777' };
+          ctx.beginPath();
+          ctx.arc(selC.x, selC.y, ringR, 0, Math.PI * 2);
+          ctx.strokeStyle = ringPal.fill;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          // Angle tick on ring
+          const tickInner = ringR - 3;
+          const tickOuter = ringR + 5;
+          ctx.beginPath();
+          ctx.moveTo(selC.x + Math.cos(ang) * tickInner, selC.y - Math.sin(ang) * tickInner);
+          ctx.lineTo(selC.x + Math.cos(ang) * tickOuter, selC.y - Math.sin(ang) * tickOuter);
+          ctx.strokeStyle = ringPal.stroke;
+          ctx.lineWidth = 2.5;
           ctx.stroke();
         }
       }

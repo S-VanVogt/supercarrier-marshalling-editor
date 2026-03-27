@@ -7,61 +7,88 @@
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-<div class="card">
-  <h1>SuperCarrier Marshalling Editor</h1>
-  <canvas id="c" height="500"></canvas>
-
-  <div class="controls">
-    <span>Progress:</span>
-    <input type="range" min="0" max="100" value="50" id="tslider" style="flex:1;min-width:120px">
-    <span id="tval" style="min-width:32px">0.50</span>
-    <span class="coord-out" id="coordout">x: &mdash;, y: &mdash;</span>
-  </div>
-
-  <p class="hint">Scroll to zoom. Shift-drag or middle-drag to pan. Right-click to add/insert waypoints when editing a route.</p>
-
-  <!-- Route point list -->
-  <div id="pt-list">
-    <div id="pt-list-title" class="pt-list-title">No route selected</div>
-    <div class="pt-header"><span>#</span><span>x</span><span>y</span><span>v</span><span></span></div>
-    <div id="pt-rows"></div>
-    <div class="add-row">
-      <label>Add:</label>
-      <input type="number" id="add-x" placeholder="x" step="0.1">
-      <input type="number" id="add-y" placeholder="y" step="0.1">
-      <button id="btn-add">+ Add point</button>
+<div class="app-layout">
+  <!-- Fixed top: canvas + controls -->
+  <div class="canvas-banner">
+    <div class="banner-header">
+      <h1>SuperCarrier Marshalling Editor</h1>
     </div>
+    <canvas id="c" height="500"></canvas>
+    <div class="controls" id="progress-bar">
+      <span>Progress:</span>
+      <input type="range" min="0" max="100" value="0" id="tslider" style="flex:1;min-width:120px">
+      <span id="tval" style="min-width:32px">0.00</span>
+      <span class="coord-out" id="coordout">x: &mdash;, y: &mdash;</span>
+    </div>
+    <div class="controls" id="crew-edit-bar" style="display:none">
+      <span id="crew-edit-label" class="crew-edit-label">No crew selected</span>
+      <div id="crew-edit-fields" class="crew-edit-fields"></div>
+      <span class="coord-out" id="coordout-crew">x: &mdash;, y: &mdash;</span>
+    </div>
+    <p class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</p>
   </div>
 
-  <!-- Takeoff Routes -->
-  <details class="panel" id="panel-takeoff" open>
-    <summary>Takeoff Routes</summary>
-    <div class="panel-body route-panel">
-      <div class="route-global">
-        <label class="toggle-label">
-          <input type="checkbox" id="takeoff-global" checked>
-          Show all takeoff routes
-        </label>
+  <!-- Scrollable panels -->
+  <div class="panels-scroll">
+
+  <!-- Routes: 3-column (Takeoff | Landing | Points) -->
+  <details class="panel" id="panel-routes" open>
+    <summary>Routes</summary>
+    <div class="panels-columns cols-3">
+      <div class="panel-col">
+        <div class="col-header">
+          <span class="col-title">Takeoff Routes</span>
+          <label class="col-show-all"><span>Show all</span><input type="checkbox" id="takeoff-global" checked></label>
+        </div>
+        <div class="route-list" id="takeoff-route-list"></div>
       </div>
-      <div class="route-list" id="takeoff-route-list"></div>
+      <div class="panel-col">
+        <div class="col-header">
+          <span class="col-title">Landing Routes</span>
+          <label class="col-show-all"><span>Show all</span><input type="checkbox" id="landing-global"></label>
+        </div>
+        <div class="route-list" id="landing-route-list"></div>
+      </div>
+      <div class="panel-col">
+        <div id="pt-list">
+          <div class="col-header">
+            <span class="col-title" id="pt-list-title">Points</span>
+          </div>
+          <div class="pt-header"><span>#</span><span>x</span><span>y</span><span>v</span><span></span></div>
+          <div id="pt-rows"></div>
+          <div class="add-row">
+            <label>Add:</label>
+            <input type="number" id="add-x" placeholder="x" step="0.1">
+            <input type="number" id="add-y" placeholder="y" step="0.1">
+            <button id="btn-add">+ Add point</button>
+          </div>
+        </div>
+      </div>
     </div>
   </details>
 
-  <!-- Landing Routes (placeholder) -->
-  <details class="panel" id="panel-landing">
-    <summary>Landing Routes</summary>
-    <div class="panel-body route-panel">
-      <div class="route-global">
-        <label class="toggle-label">
-          <input type="checkbox" id="landing-global">
-          Show all landing routes
-        </label>
+  <!-- Crew: 2-column (Idle | Active) -->
+  <details class="panel" id="panel-crew">
+    <summary>Crew</summary>
+    <div class="panels-columns cols-2">
+      <div class="panel-col">
+        <div class="col-header">
+          <span class="col-title">Idle Positions (members)</span>
+          <label class="col-show-all"><span>Show all</span><input type="checkbox" id="crew-idle-global" checked></label>
+        </div>
+        <div class="route-list" id="crew-idle-list"></div>
       </div>
-      <div class="route-list" id="landing-route-list"></div>
+      <div class="panel-col">
+        <div class="col-header">
+          <span class="col-title">Active Positions (routes)</span>
+          <label class="col-show-all"><span>Show all</span><input type="checkbox" id="crew-active-global" checked></label>
+        </div>
+        <div class="route-list" id="crew-active-list"></div>
+      </div>
     </div>
   </details>
 
-  <!-- Lua Import / Export -->
+  <!-- Import / Export -->
   <details class="panel" id="panel-lua-io" open>
     <summary>Import / Export</summary>
     <div class="panel-body">
@@ -77,38 +104,8 @@
       </div>
     </div>
   </details>
-
-  <!-- Crew -->
-  <details class="panel" id="panel-crew">
-    <summary>Crew</summary>
-    <div class="panel-body route-panel">
-      <div class="route-global">
-        <label class="toggle-label">
-          <input type="checkbox" id="crew-global" checked>
-          Show all crew members
-        </label>
-      </div>
-
-      <!-- Idle Positions sub-section -->
-      <div class="crew-section">
-        <div class="crew-section-header">
-          <span class="crew-section-title">Idle Positions (members)</span>
-          <button id="btn-edit-idle-crew" class="route-edit-btn" title="Edit idle positions on canvas">Edit</button>
-        </div>
-        <div class="route-list" id="crew-idle-list"></div>
-      </div>
-
-      <!-- Active Positions sub-section -->
-      <div class="crew-section">
-        <div class="crew-section-header">
-          <span class="crew-section-title">Active Positions (routes)</span>
-          <button id="btn-edit-active-crew" class="route-edit-btn" title="Edit active positions on canvas">Edit</button>
-        </div>
-        <div class="route-list" id="crew-active-list"></div>
-      </div>
-    </div>
-  </details>
-</div>
+  </div><!-- .panels-scroll -->
+</div><!-- .app-layout -->
 
 <script type="module" src="js/app.js"></script>
 </body>

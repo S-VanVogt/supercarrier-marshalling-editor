@@ -21,12 +21,12 @@ class RouteState {
     this.takeoffRouteVisible = new Array(TAKEOFF_ROUTES.length).fill(true);
 
     this.landingVisible = false;
-    this.landingRouteVisible = new Array(LANDING_ROUTES.length).fill(true);
+    this.landingRouteVisible = new Array(LANDING_ROUTES.length).fill(false);
 
     this.crewVisible = new Array(CREW_MEMBERS.length).fill(true);
 
     /** Progress ratio 0–1 for route marker. */
-    this.t = 0.5;
+    this.t = 0;
 
     /** Type of selected route: 'takeoff' | 'landing' | null */
     this.selectedRouteType = null;
@@ -34,14 +34,23 @@ class RouteState {
     this.selectedRoute = -1;
     /** Index of waypoint being dragged (-1 = none). */
     this.draggingPoint = -1;
+    /** Index of last-selected waypoint for highlight (-1 = none). */
+    this.selectedWaypoint = -1;
 
     // ── Crew editing state ──────────────────────────────────────────────
-    /** Crew edit mode: 'idle' | 'active' | null */
-    this.crewEditMode = null;
+    /** Whether crew edit mode is active. */
+    this.crewEditMode = false;
+    /** Type of selected crew item: 'idle' | 'active' | null */
+    this.selectedCrewType = null;
     /** Index of selected crew member/route for editing (-1 = none). */
     this.selectedCrewIdx = -1;
+    /** Type of hovered crew item: 'idle' | 'active' | null */
+    this.hoveredCrewType = null;
     /** Index of hovered crew member/route (-1 = none), for scroll-wheel rotation. */
     this.hoveredCrewIdx = -1;
+    /** Point index within a multi-point active route (-1 = single-point or idle). */
+    this.selectedCrewPointIdx = -1;
+    this.hoveredCrewPointIdx = -1;
     /** Whether a crew dot is being dragged. */
     this.draggingCrew = false;
 
@@ -135,9 +144,13 @@ class RouteState {
   selectRoute(type, i) {
     // Mutual exclusivity: exit crew edit when selecting a route
     if (this.crewEditMode) {
-      this.crewEditMode = null;
+      this.crewEditMode = false;
+      this.selectedCrewType = null;
       this.selectedCrewIdx = -1;
+      this.selectedCrewPointIdx = -1;
+      this.hoveredCrewType = null;
       this.hoveredCrewIdx = -1;
+      this.hoveredCrewPointIdx = -1;
       this.draggingCrew = false;
     }
     this.selectedRouteType = type;
@@ -149,78 +162,105 @@ class RouteState {
     this.selectedRouteType = null;
     this.selectedRoute = -1;
     this.draggingPoint = -1;
+    this.selectedWaypoint = -1;
     this._notify();
   }
 
   // ── Crew editing ──────────────────────────────────────────────────
 
-  enterCrewEdit(mode) {
+  enterCrewEdit() {
     // Mutual exclusivity: exit route edit when entering crew edit
     if (this.selectedRoute >= 0) {
       this.selectedRouteType = null;
       this.selectedRoute = -1;
       this.draggingPoint = -1;
     }
-    this.crewEditMode = mode;
+    this.crewEditMode = true;
+    this.selectedCrewType = null;
     this.selectedCrewIdx = -1;
+    this.selectedCrewPointIdx = -1;
+    this.hoveredCrewType = null;
     this.hoveredCrewIdx = -1;
+    this.hoveredCrewPointIdx = -1;
     this.draggingCrew = false;
     this._notify();
   }
 
   exitCrewEdit() {
-    this.crewEditMode = null;
+    this.crewEditMode = false;
+    this.selectedCrewType = null;
     this.selectedCrewIdx = -1;
+    this.selectedCrewPointIdx = -1;
+    this.hoveredCrewType = null;
     this.hoveredCrewIdx = -1;
+    this.hoveredCrewPointIdx = -1;
     this.draggingCrew = false;
     this._notify();
   }
 
-  selectCrewMember(idx) {
+  selectCrewMember(idx, type, pointIdx = -1) {
     this.selectedCrewIdx = idx;
+    this.selectedCrewType = type;
+    this.selectedCrewPointIdx = pointIdx;
     this._notify();
   }
 
-  moveCrewMember(idx, x, y) {
-    if (this.crewEditMode === 'idle') {
+  moveCrewMember(idx, type, x, y, pointIdx = -1) {
+    if (type === 'idle') {
       const m = CREW_MEMBERS[idx];
       if (m) { m.x = x; m.y = y; this._notify(); }
-    } else if (this.crewEditMode === 'active') {
+    } else if (type === 'active') {
       const r = CREW_ROUTES[idx];
-      if (r) {
+      if (!r) return;
+      if (r.points && r.points.length > 0 && pointIdx >= 0) {
+        // Move specific point within multi-point route
+        const pt = r.points[pointIdx];
+        if (pt) { pt.x = x; pt.y = y; }
+        // Keep route.x/y synced to last point
+        const last = r.points[r.points.length - 1];
+        r.x = last.x; r.y = last.y;
+      } else {
+        // Single-point route or no point specified
         r.x = x; r.y = y;
-        // Also update last point if multi-point route
         if (r.points && r.points.length > 0) {
           r.points[r.points.length - 1].x = x;
           r.points[r.points.length - 1].y = y;
         }
-        this._notify();
       }
+      this._notify();
     }
   }
 
-  rotateCrewMember(idx, deltaDeg) {
-    if (this.crewEditMode === 'idle') {
+  rotateCrewMember(idx, type, deltaDeg, pointIdx = -1) {
+    if (type === 'idle') {
       const m = CREW_MEMBERS[idx];
       if (m) {
         m.hdg = ((m.hdg + deltaDeg + 180) % 360 + 360) % 360 - 180;
         this._notify();
       }
-    } else if (this.crewEditMode === 'active') {
+    } else if (type === 'active') {
       const r = CREW_ROUTES[idx];
-      if (r) {
-        const deltaRad = deltaDeg * Math.PI / 180;
+      if (!r) return;
+      const deltaRad = deltaDeg * Math.PI / 180;
+      if (r.points && r.points.length > 0 && pointIdx >= 0) {
+        // Rotate specific point
+        const pt = r.points[pointIdx];
+        if (pt) {
+          pt.angle = pt.angle + deltaRad;
+          while (pt.angle > Math.PI) pt.angle -= 2 * Math.PI;
+          while (pt.angle < -Math.PI) pt.angle += 2 * Math.PI;
+        }
+        // Keep route.angle synced to last point
+        r.angle = r.points[r.points.length - 1].angle;
+      } else {
         r.angle = r.angle + deltaRad;
-        // Wrap to [-PI, PI]
         while (r.angle > Math.PI) r.angle -= 2 * Math.PI;
         while (r.angle < -Math.PI) r.angle += 2 * Math.PI;
-        // Also update last point if multi-point route
         if (r.points && r.points.length > 0) {
-          const lp = r.points[r.points.length - 1];
-          lp.angle = r.angle;
+          r.points[r.points.length - 1].angle = r.angle;
         }
-        this._notify();
       }
+      this._notify();
     }
   }
 

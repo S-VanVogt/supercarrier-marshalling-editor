@@ -4,18 +4,144 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
   background: #f5f5f3;
   color: #1a1a18;
-  padding: 24px;
+  margin: 0;
+  overflow: hidden;
+  height: 100vh;
 }
 
-h1 { font-size: 18px; font-weight: 500; margin-bottom: 16px; }
+h1 { font-size: 18px; font-weight: 500; margin: 0; }
 
-.card {
-  background: #fff;
-  border: 0.5px solid #d3d1c7;
-  border-radius: 12px;
-  padding: 16px;
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
   max-width: 2048px;
   margin: 0 auto;
+  background: #fff;
+  border-left: 0.5px solid #d3d1c7;
+  border-right: 0.5px solid #d3d1c7;
+}
+
+.canvas-banner {
+  flex-shrink: 0;
+  padding: 8px 12px 4px;
+  border-bottom: 1px solid #d3d1c7;
+  background: #fff;
+}
+
+.banner-header {
+  margin-bottom: 6px;
+}
+
+.panels-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 12px 16px;
+}
+
+.panels-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.panels-columns.cols-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.panels-columns.cols-3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.crew-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 0.5px solid #d3d1c7;
+}
+
+.crew-edit-label {
+  font-size: 13px;
+  color: #5f5e5a;
+  white-space: nowrap;
+}
+
+.crew-edit-fields {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.crew-edit-fields label {
+  font-size: 10px;
+  color: #888780;
+  margin-left: 4px;
+}
+
+.crew-edit-fields input[type="number"] {
+  font-family: monospace;
+  font-size: 13px;
+  width: 80px;
+  padding: 3px 6px;
+  border: 0.5px solid #d3d1c7;
+  border-radius: 4px;
+  background: #fff;
+  color: #1a1a18;
+  outline: none;
+}
+
+.crew-edit-fields input[type="number"]:focus {
+  border-color: #888780;
+}
+
+.crew-edit-fields input[type="number"]:hover {
+  border-color: #b4b2a9;
+}
+
+
+.crew-edit-fields input[data-k="hdg"],
+.crew-edit-fields input[data-k="angle"] {
+  width: 95px;
+}
+
+.panel-col {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.panel-col #pt-list { margin-top: 0; height: 100%; display: flex; flex-direction: column; }
+.panel-col #pt-list #pt-rows { flex: 1; }
+
+.col-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 0 6px;
+  border-bottom: 0.5px solid #d3d1c7;
+  margin-bottom: 4px;
+}
+
+.col-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a18;
+}
+
+.col-show-all {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #5f5e5a;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.col-show-all input[type="checkbox"] {
+  margin: 0;
 }
 
 /* ── Canvas ──────────────────────────────────────────────────────────────── */
@@ -71,19 +197,14 @@ button:hover { background: #f1efe8; }
 
 /* ── Point list table ────────────────────────────────────────────────────── */
 #pt-list {
-  margin-top: 14px;
-  border: 0.5px solid #d3d1c7;
-  border-radius: 12px;
+  margin-top: 0;
   overflow: hidden;
 }
 
 .pt-list-title {
-  background: #f1efe8;
-  padding: 6px 10px;
   font-size: 12px;
-  font-weight: 500;
-  color: #5f5e5a;
-  border-bottom: 0.5px solid #d3d1c7;
+  font-weight: 600;
+  color: #1a1a18;
 }
 
 .pt-header {
@@ -105,6 +226,7 @@ button:hover { background: #f1efe8; }
 }
 .pt-row:last-child { border-bottom: none; }
 .pt-row:hover { background: #f1efe8; }
+.pt-row.selected { background: #deeaf6; }
 
 .pt-idx { font-size: 12px; color: #888780; font-family: monospace; }
 
@@ -255,8 +377,6 @@ button:hover { background: #f1efe8; }
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 320px;
-  overflow-y: auto;
 }
 
 .route-row {
@@ -285,6 +405,27 @@ button:hover { background: #f1efe8; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+#crew-idle-list .route-label,
+#crew-active-list .route-label {
+  cursor: pointer;
+  flex-shrink: 0;
+  overflow: visible;
+  white-space: nowrap;
+}
+#crew-idle-list .route-label:hover,
+#crew-active-list .route-label:hover {
+  color: #0066cc;
+}
+.crew-ref-tags {
+  font-family: monospace;
+  font-size: 9px;
+  color: #7a7a72;
+  white-space: normal;
+  word-break: break-word;
+  flex-shrink: 1;
+  margin-left: 2px;
+  line-height: 1.3;
 }
 
 .route-label-input {
