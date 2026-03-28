@@ -15,7 +15,7 @@ Pure vanilla JS (ES modules), no build step, no framework. Canvas 2D rendering w
 - `index.html` — Single page app shell, all panels
 - `js/app.js` — Entry point, wires viewport/renderer/ui/routeState
 - `js/viewport.js` — Pan/zoom, world↔canvas coordinate transforms
-- `js/renderer.js` — All canvas drawing: grid, polygon, catapults, JBDs, crew, routes, active crew lines
+- `js/renderer.js` — All canvas drawing: grid, polygon, deck markings, catapults, JBDs, crew, routes, active crew lines, F-14 overlay
 - `js/ui.js` — DOM event handling, panel sync, route editing (drag waypoints, right-click add/insert)
 - `js/route-state.js` — Reactive state: route selection, visibility, progress `t`, change notification
 - `js/route-data.js` — 16 takeoff route definitions (points with x/y/v)
@@ -24,8 +24,10 @@ Pure vanilla JS (ES modules), no build step, no framework. Canvas 2D rendering w
 - `js/takeoff-tasks-data.js` — 16 takeoff task definitions with brown/yellow handoff steps, `TAKEOFF_USED_ROUTE_IDS`, `PARKING_ASSIGNMENTS[]`, `NON_TAKEOFF_LINKS[]`
 - `js/crew-lua-parser.js` — Parses crew.lua text into members/routes/tasks data structures
 - `js/lua-patcher.js` — RunwaysAndRoutes.lua import/export (preserves structure, strips block comments)
-- `js/crew-lua-patcher.js` — crew.lua export: patches edited member positions/headings and route positions/angles back into original crew.lua text
+- `js/crew-lua-patcher.js` — crew.lua export: patches edited member positions/headings, route positions/angles, and catapult crew routes back into original crew.lua text
+- `js/catapult-crew-data.js` — Catapult crew data model (4 cats × 6 members), phase definitions, Catmull-Rom tangent recalculation, memberLocalTs()
 - `js/polygon-data.js` — Carrier deck outline polygon
+- `assets/f14-folded.svg` — F-14 folded-wing silhouette (outline only) for route progress overlay
 - `js/polyline.js` — Polyline math: interpolated point at t (x, y, v), nearest point search
 - `js/state.js` — Legacy polyline state (unused, can be removed)
 - `server.py` — No-cache dev HTTP server
@@ -69,8 +71,19 @@ Pure vanilla JS (ES modules), no build step, no framework. Canvas 2D rendering w
 - Landing crew positions: **always gray** (shown even with no routes visible), **colored** when landing routes visible
 - When editing a specific route, that route's crew shows colored, others gray
 
+### Deck Markings (static overlays in renderer.js)
+- Landing area outline — gray fill + border, closed polygon
+- Angled deck centerline — 18 alternating yellow/white dashes (arc-length interpolated), 1m world-space width, 40% opacity
+- Foul lines (3) — red/white alternating dashes, 0.2m wide, 30% opacity
+- Elevators (4: El1–El3 port side, El4 starboard mirrored) — yellow/red alternating dashes, open path (no bottom segment)
+
+### F-14 Overlay
+- Folded-wing silhouette rendered at route progress marker position
+- Outline only (fill="none"), 50% opacity
+- Rotated to match route heading; 180° extra rotation on landing routes at t=1.0
+
 ### Render Order
-grid → polygon → catapults → JBDs → unusedRoutePositions → crewActivePositions → crew → takeoffRoutes → landingRoutes → activeCrewLines
+grid → polygon → deckMarkings → catapults → JBDs → unusedRoutePositions → crewActivePositions → crew → takeoffRoutes → landingRoutes → activeCrewLines
 
 ### Coordinate System
 - x = along deck (negative = bow/front, positive = stern/back)
@@ -87,6 +100,7 @@ grid → polygon → catapults → JBDs → unusedRoutePositions → crewActiveP
 ### Panels (scrollable below canvas)
 - **Routes panel** — 3-column grid: Takeoff Routes | Landing Routes | Points list. Each route column has "Show all" checkbox in header. Points column shows editable waypoints for selected route.
 - **Crew panel** — 2-column grid: Idle Positions (members) | Active Positions (routes). Each column has "Show all" checkbox. Crew names are clickable to select. T/L reference tags show which takeoff/landing tasks use each member/route.
+- **Catapult Crew panel** — Catapult selector (Cat1–4), phase selector (idle→occupy_cat), t slider. Shows catapult crew routes with waypoint editing.
 - **Import/Export panel** — Import/export buttons for RunwaysAndRoutes and crew.lua, with header comment fields.
 
 ## Canvas Interaction
@@ -138,3 +152,4 @@ grid → polygon → catapults → JBDs → unusedRoutePositions → crewActiveP
 - `polyline-app-backup-v10` — (created in earlier session)
 - `polyline-app-backup-v11` — (created in earlier session)
 - `polyline-app-backup-v12` — After F-14 silhouette overlay on route progress marker, 180° rotation on landing at t=1.0
+- `polyline-app-backup-v13` — After deck markings (LA, centerline, foul lines, 4 elevators), catapult crew editing, polygon vertex fix
