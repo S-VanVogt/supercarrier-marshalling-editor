@@ -11,6 +11,8 @@ import { replaceCrewMembers } from './crew-data.js';
 import { CREW_ROUTES, replaceCrewRoutes } from './crew-routes-data.js';
 import { replaceTaskData, TAKEOFF_TASKS, PARKING_TASKS } from './takeoff-tasks-data.js';
 import { patchCrewLua, downloadPatchedCrewLua } from './crew-lua-patcher.js';
+import { parseCatapultCrew } from './crew-lua-parser.js';
+import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs, replaceCatapultCrews } from './catapult-crew-data.js';
 
 export class UI {
   /** @param {import('./viewport.js').Viewport} viewport  @param {import('./renderer.js').Renderer} renderer  @param {import('./route-state.js').RouteState} routeState */
@@ -131,7 +133,7 @@ export class UI {
     document.getElementById('btn-export-crew').addEventListener('click', () => {
       if (!this._originalCrewLuaText) { alert('crew.lua not imported yet.'); return; }
       const headerComment = document.getElementById('crew-header-comment').value.trim();
-      downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, headerComment);
+      downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment);
     });
 
     // Crew edit mode button (optional, may not exist)
@@ -163,8 +165,36 @@ export class UI {
       this.rs.setAllCrew(e.target.checked);
     });
     document.getElementById('crew-active-global').addEventListener('change', e => {
-      // Active "show all" controls visibility of all crew (same underlying data)
-      this.rs.setAllCrew(e.target.checked);
+      this.rs.setAllCrewActive(e.target.checked);
+    });
+
+    // ── Catapult crew panel ──────────────────────────────────────────────
+    document.getElementById('chk-catcrew-visible').addEventListener('change', e => {
+      this.rs.catCrewVisible = e.target.checked;
+      this.rs._notify();
+    });
+
+    document.querySelectorAll('.cat-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.rs.setCatCrewCatapult(parseInt(btn.dataset.cat));
+        this._syncCatCrewPanel();
+        this._rebuildCatCrewList();
+      });
+    });
+
+    document.querySelectorAll('.phase-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.rs.setCatCrewPhase(parseInt(btn.dataset.phase));
+        this._syncCatCrewPanel();
+        this._rebuildCatCrewList();
+      });
+    });
+
+    const catSlider = document.getElementById('cat-crew-slider');
+    catSlider.addEventListener('input', e => {
+      this.rs.setCatCrewT(parseFloat(e.target.value));
+      document.getElementById('cat-crew-t-value').textContent = parseFloat(e.target.value).toFixed(2);
+      this._rebuildCatCrewList();
     });
 
     // Resize
@@ -274,10 +304,14 @@ export class UI {
       const refLabel = this._crewRefLabel(this._routeRefs.get(i));
       row.innerHTML = `
         <span class="route-color-dot" style="background:#999"></span>
+        <input type="checkbox" checked data-cai="${i}">
         <span class="route-label">${i}: [${i + 1}] ${r.name}</span>
         <span class="crew-ref-tags">${refLabel}</span>
         <button class="route-revert-btn" data-cri="${i}" title="Revert to original" disabled>Revert</button>
       `;
+      row.querySelector('input[type="checkbox"]').addEventListener('change', () => {
+        this.rs.toggleCrewActive(i);
+      });
       row.querySelector('.route-label').addEventListener('click', () => {
         if (!this.rs.crewEditMode) this.rs.enterCrewEdit();
         this.rs.selectCrewMember(i, 'active', -1);
@@ -381,8 +415,9 @@ export class UI {
     // Replace task data in-place
     replaceTaskData(data.takeoffTasks, data.parkingTasks);
 
-    // Update crew visibility array to match new member count
+    // Update crew visibility arrays to match new counts
     this.rs.crewVisible = new Array(data.members.length).fill(true);
+    this.rs.crewActiveVisible = new Array(data.routes.length).fill(true);
 
     // Refresh snapshots for revert
     this.rs.refreshCrewSnapshots();
@@ -394,6 +429,19 @@ export class UI {
     this._buildCrewRefMaps();
     this._rebuildCrewIdleList();
     this._rebuildCrewActiveList();
+
+    // Parse catapult crew section
+    try {
+      const catCrewData = parseCatapultCrew(text);
+      if (catCrewData.length > 0) {
+        replaceCatapultCrews(catCrewData);
+        this.rs.refreshCatCrewSnapshots();
+        this._rebuildCatCrewList();
+        console.log(`Imported catapult crew: ${catCrewData.length} catapults`);
+      }
+    } catch (e) {
+      console.warn('Could not parse catapult crew section:', e.message);
+    }
 
     // Trigger redraw
     this.rs._notify();
@@ -447,13 +495,14 @@ export class UI {
       const isSelected = this.rs.crewEditMode && this.rs.selectedCrewType === 'idle' && this.rs.selectedCrewIdx === i;
       idleRows[i].classList.toggle('selected', isSelected);
     }
-    const allVis = this.rs.allCrewVisible();
-    document.getElementById('crew-idle-global').checked = allVis;
-    document.getElementById('crew-active-global').checked = allVis;
+    document.getElementById('crew-idle-global').checked = this.rs.allCrewVisible();
+    document.getElementById('crew-active-global').checked = this.rs.allCrewActiveVisible();
 
     // Crew active sync
     const activeRows = document.querySelectorAll('#crew-active-list .route-row');
     for (let i = 0; i < activeRows.length; i++) {
+      const cb = activeRows[i].querySelector('input[type="checkbox"]');
+      if (cb) cb.checked = this.rs.crewActiveVisible[i];
       const revertBtn = activeRows[i].querySelector('.route-revert-btn');
       if (revertBtn) revertBtn.disabled = !this.rs.isCrewRouteModified(i);
       const isSelected = this.rs.crewEditMode && this.rs.selectedCrewType === 'active' && this.rs.selectedCrewIdx === i;
@@ -593,8 +642,9 @@ export class UI {
   }
 
   _isPanButton(e) {
-    // Right-click is for adding waypoints when in route edit mode, not panning
+    // Right-click is for adding waypoints when in edit mode, not panning
     if (e.button === 2 && this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) return false;
+    if (e.button === 2 && this.rs.catCrewEditMode && this.rs.catCrewEditMember >= 0) return false;
     return e.button === 1 || e.button === 2 || (e.button === 0 && e.shiftKey);
   }
 
@@ -610,12 +660,51 @@ export class UI {
       this._onRouteRightClick(e);
       return;
     }
+    // Right-click to add waypoints in cat crew edit mode
+    if (e.button === 2 && this.rs.catCrewEditMode && this.rs.catCrewEditMember >= 0) {
+      this._onCatCrewRightClick(e);
+      return;
+    }
     if (e.button !== 0) return;
 
     const w = this._canvasWorld(e);
 
+    // Catapult crew edit mode: handle waypoint drag or switch/exit
+    if (this.rs.catCrewEditMode) {
+      const catHit = this._catCrewHitTest(w);
+      if (catHit.memberIdx >= 0) {
+        this.rs.catCrewEditMember = catHit.memberIdx;
+        this.rs.catCrewSelectedPoint = catHit.pointIdx;
+        this.rs.catCrewDraggingPoint = catHit.pointIdx;
+        this.canvas.setPointerCapture(e.pointerId);
+        this.rs._notify();
+        this.renderList();
+        return;
+      }
+      // Miss cat crew — try crew dots or route segments to switch
+      const crewHit = this._crewHitTest(w);
+      if (crewHit.idx >= 0) {
+        this.rs.exitCatCrewEdit();
+        this.rs.enterCrewEdit();
+        this.rs.selectCrewMember(crewHit.idx, crewHit.type, crewHit.pointIdx);
+        this.rs.draggingCrew = true;
+        this.canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      const routeHit = this._routeHitTest(w);
+      if (routeHit) {
+        this.rs.exitCatCrewEdit();
+        this.rs.selectRoute(routeHit.type, routeHit.idx);
+        this.renderList();
+        return;
+      }
+      // Miss everything — exit cat crew edit
+      this.rs.exitCatCrewEdit();
+      this.renderList();
+    }
+
     // Crew edit mode: handle crew interaction, or fall through to switch
-    if (this.rs.crewEditMode) {
+    else if (this.rs.crewEditMode) {
       const crewHit = this._crewHitTest(w);
       if (crewHit.idx >= 0) {
         this.rs.selectCrewMember(crewHit.idx, crewHit.type, crewHit.pointIdx);
@@ -674,8 +763,19 @@ export class UI {
       }
     }
 
-    // No edit mode — click-to-enter: test crew dots first, then route segments
+    // No edit mode — click-to-enter: test cat crew waypoints, crew dots, then route segments
     else {
+      // Catapult crew waypoints
+      const catHit = this._catCrewHitTest(w);
+      if (catHit.memberIdx >= 0) {
+        this.rs.enterCatCrewEdit(catHit.memberIdx);
+        this.rs.catCrewSelectedPoint = catHit.pointIdx;
+        this.rs.catCrewDraggingPoint = catHit.pointIdx;
+        this.canvas.setPointerCapture(e.pointerId);
+        this.rs._notify();
+        this.renderList();
+        return;
+      }
       const crewHit = this._crewHitTest(w);
       if (crewHit.idx >= 0) {
         this.rs.enterCrewEdit();
@@ -772,6 +872,19 @@ export class UI {
       this._panLast = this._canvasWorld(e);
       return;
     }
+    // Catapult crew edit mode: drag or hover
+    if (this.rs.catCrewEditMode) {
+      const w = this._canvasWorld(e);
+      if (this.rs.catCrewDraggingPoint >= 0) {
+        this.rs.moveCatCrewWaypoint(this.rs.catCrewDraggingPoint, +w.x.toFixed(4), +w.y.toFixed(4));
+        this.renderList();
+        return;
+      }
+      // Hover cursor
+      const catHit = this._catCrewHitTest(w);
+      this.canvas.style.cursor = catHit.memberIdx >= 0 ? this._circleCrosshairCursor() : 'crosshair';
+      return;
+    }
     // Crew edit mode: drag or hover
     if (this.rs.crewEditMode) {
       this._onCrewPointerMove(e);
@@ -783,6 +896,11 @@ export class UI {
     }
     // No edit mode: show cursor hint over clickable elements
     const w = this._canvasWorld(e);
+    const catHit = this._catCrewHitTest(w);
+    if (catHit.memberIdx >= 0) {
+      this.canvas.style.cursor = this._circleCrosshairCursor();
+      return;
+    }
     const crewHit = this._crewHitTest(w);
     if (crewHit.idx >= 0) {
       this.canvas.style.cursor = this._circleCrosshairCursor();
@@ -797,6 +915,7 @@ export class UI {
     this._panLast = null;
     this.rs.draggingPoint = -1;
     this.rs.draggingCrew = false;
+    this.rs.catCrewDraggingPoint = -1;
   }
 
   // ── Route pointer handlers ────────────────────────────────────────────
@@ -885,6 +1004,46 @@ export class UI {
 
   // ── Crew pointer handlers ────────────────────────────────────────────
   /** Hit-test both idle members and active routes. Returns { idx, type, pointIdx }. */
+  // ── Catapult crew route hit testing & interaction ─────────────────────
+
+  /** Hit-test catapult crew route waypoints. Returns { memberIdx, pointIdx } or { memberIdx: -1 }. */
+  _catCrewHitTest(w) {
+    if (!this.rs.catCrewVisible) return { memberIdx: -1, pointIdx: -1 };
+    const crew = CATAPULT_CREWS[this.rs.catCrewCatapult];
+    if (!crew) return { memberIdx: -1, pointIdx: -1 };
+    const phase = CATAPULT_PHASES[this.rs.catCrewPhase];
+    const hr = this._hitRadius();
+    let bestMi = -1, bestPi = -1, bestD = Infinity;
+
+    for (let mi = 0; mi < crew.members.length; mi++) {
+      const route = findPhaseRoute(crew.members[mi], phase);
+      if (!route || route.points.length === 0) continue;
+      for (let pi = 0; pi < route.points.length; pi++) {
+        const dx = route.points[pi].x - w.x, dy = route.points[pi].y - w.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < hr && d < bestD) { bestMi = mi; bestPi = pi; bestD = d; }
+      }
+    }
+    return { memberIdx: bestMi, pointIdx: bestPi };
+  }
+
+  _onCatCrewRightClick(e) {
+    e.preventDefault();
+    const route = this.rs.getCatCrewEditRoute();
+    if (!route || route.points.length < 2) return;
+    const w = this._canvasWorld(e);
+
+    // Find nearest segment
+    let bestSeg = 0, bestD = Infinity;
+    for (let j = 0; j < route.points.length - 1; j++) {
+      const d = this._distToSegment(w, route.points[j], route.points[j + 1]);
+      if (d < bestD) { bestSeg = j; bestD = d; }
+    }
+    this.rs.addCatCrewWaypoint(bestSeg, +w.x.toFixed(4), +w.y.toFixed(4));
+    this.rs.catCrewSelectedPoint = bestSeg + 1;
+    this.renderList();
+  }
+
   _crewHitTest(w) {
     const hr = this._hitRadius();
     let bestIdx = -1, bestType = null, bestPointIdx = -1, bestD = Infinity;
@@ -963,6 +1122,53 @@ export class UI {
     const isRoute = ri >= 0 && type;
     const route = isRoute ? this.rs.getSelectedRoute() : null;
     const points = route ? route.points : [];
+
+    // ── Catapult crew route edit mode ──
+    if (this.rs.catCrewEditMode && this.rs.catCrewEditMember >= 0) {
+      const catRoute = this.rs.getCatCrewEditRoute();
+      const member = this.rs.getCatCrewEditMember();
+      if (catRoute && member) {
+        const phase = CATAPULT_PHASES[this.rs.catCrewPhase];
+        title.textContent = `Cat ${this.rs.catCrewCatapult + 1} ${member.name} — ${phase.label}`;
+        header.innerHTML = `<span>#</span><span>x</span><span>y</span><span></span>`;
+        header.style.gridTemplateColumns = '28px 1fr 1fr 28px';
+        catRoute.points.forEach((p, i) => {
+          const row = document.createElement('div');
+          row.className = 'pt-row' + (i === this.rs.catCrewSelectedPoint ? ' selected' : '');
+          row.style.gridTemplateColumns = '28px 1fr 1fr 28px';
+          row.innerHTML = `
+            <span class="pt-idx">${i}</span>
+            <input type="number" value="${p.x.toFixed(4)}" step="0.1" data-i="${i}" data-k="x">
+            <input type="number" value="${p.y.toFixed(4)}" step="0.1" data-i="${i}" data-k="y">
+            <button class="del-btn" title="Remove">\u2715</button>
+          `;
+          row.querySelector('.del-btn').addEventListener('click', () => {
+            this.rs.removeCatCrewWaypoint(i);
+            this.renderList();
+          });
+          for (const inp of row.querySelectorAll('input')) {
+            inp.addEventListener('input', () => {
+              const val = parseFloat(inp.value);
+              if (isNaN(val)) return;
+              const idx = +inp.dataset.i;
+              const key = inp.dataset.k;
+              const pt = catRoute.points[idx];
+              this.rs.moveCatCrewWaypoint(idx,
+                key === 'x' ? val : pt.x,
+                key === 'y' ? val : pt.y);
+            });
+          }
+          row.addEventListener('click', (ev) => {
+            if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'BUTTON') return;
+            this.rs.catCrewSelectedPoint = i;
+            this.rs._notify();
+            this.renderList();
+          });
+          this.ptRows.appendChild(row);
+        });
+        return;
+      }
+    }
 
     if (route) {
       const prefix = type === 'landing' ? 'Landing' : 'Route';
@@ -1069,6 +1275,95 @@ export class UI {
     this.canvas.height = 500;
     this.viewport.equalizeScale(this.canvas.width, this.canvas.height);
     this._update();
+  }
+
+  // ── Catapult crew panel ───────────────────────────────────────────────
+
+  _syncCatCrewPanel() {
+    document.querySelectorAll('.cat-btn').forEach(btn => {
+      btn.classList.toggle('active', parseInt(btn.dataset.cat) === this.rs.catCrewCatapult);
+    });
+    document.querySelectorAll('.phase-btn').forEach(btn => {
+      btn.classList.toggle('active', parseInt(btn.dataset.phase) === this.rs.catCrewPhase);
+    });
+  }
+
+  _rebuildCatCrewList() {
+    const list = document.getElementById('catcrew-member-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    const crew = CATAPULT_CREWS[this.rs.catCrewCatapult];
+    if (!crew || !crew.members.length) {
+      list.innerHTML = '<div style="font-size:11px;color:#999;padding:4px">No catapult crew data. Import crew.lua first.</div>';
+      return;
+    }
+
+    const phase = CATAPULT_PHASES[this.rs.catCrewPhase];
+
+    const catIdx = this.rs.catCrewCatapult;
+    const localTs = memberLocalTs(crew, phase, this.rs.catCrewT);
+
+    for (let mi = 0; mi < crew.members.length; mi++) {
+      const member = crew.members[mi];
+      const colors = CATAPULT_MEMBER_COLORS[member.name] || { fill: '#aaa', stroke: '#888' };
+      const route = findPhaseRoute(member, phase);
+      const t = localTs[mi];
+
+      let wx, wy;
+      if (phase.useFastStart) {
+        const fsp = member.fastStartPosition;
+        if (fsp) { wx = fsp.x; wy = fsp.y; }
+        else { wx = member.position.x; wy = member.position.y; }
+      } else if (!route || route.points.length === 0) {
+        wx = member.position.x;
+        wy = member.position.y;
+      } else {
+        const pts = route.points;
+        if (t >= 1 || pts.length === 1) {
+          const last = pts[pts.length - 1];
+          wx = last.x; wy = last.y;
+        } else if (t <= 0) {
+          wx = pts[0].x; wy = pts[0].y;
+        } else {
+          const totalSegs = pts.length - 1;
+          const rawIdx = t * totalSegs;
+          const segIdx = Math.min(Math.floor(rawIdx), totalSegs - 1);
+          const segT = rawIdx - segIdx;
+          const a = pts[segIdx], b = pts[segIdx + 1];
+          wx = a.x + (b.x - a.x) * segT;
+          wy = a.y + (b.y - a.y) * segT;
+        }
+      }
+
+      const isEditing = this.rs.catCrewEditMode && this.rs.catCrewEditMember === mi;
+      const isModified = this.rs.isCatCrewMemberModified(catIdx, mi);
+      const row = document.createElement('div');
+      row.className = 'route-row' + (isEditing ? ' selected' : '');
+      row.innerHTML = `
+        <span style="display:inline-block;width:8px;height:8px;transform:rotate(45deg);background:${colors.fill};border:1px solid ${colors.stroke};margin-right:4px;flex-shrink:0"></span>
+        <span class="route-label" style="min-width:70px;cursor:pointer">${member.name}</span>
+        <span style="font-size:10px;color:#888;font-variant-numeric:tabular-nums">${wx.toFixed(2)}, ${wy.toFixed(2)}</span>
+        <button class="route-revert-btn" title="Revert to original" ${isModified ? '' : 'disabled'}>Revert</button>
+      `;
+      row.querySelector('.route-label').addEventListener('click', () => {
+        if (!this.rs.catCrewEditMode) {
+          this.rs.enterCatCrewEdit(mi);
+        } else {
+          this.rs.catCrewEditMember = mi;
+          this.rs.catCrewSelectedPoint = -1;
+          this.rs._notify();
+        }
+        this.renderList();
+        this._rebuildCatCrewList();
+      });
+      row.querySelector('.route-revert-btn').addEventListener('click', () => {
+        this.rs.revertCatCrewMember(catIdx, mi);
+        this._rebuildCatCrewList();
+        this.renderList();
+      });
+      list.appendChild(row);
+    }
   }
 
   /** First paint. */

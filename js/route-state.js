@@ -5,6 +5,7 @@
 import { TAKEOFF_ROUTES, LANDING_ROUTES } from './route-data.js';
 import { CREW_MEMBERS } from './crew-data.js';
 import { CREW_ROUTES } from './crew-routes-data.js';
+import { CATAPULT_CREWS, CATAPULT_PHASES, findPhaseRoute, recalcTangents } from './catapult-crew-data.js';
 
 function cloneRoutes(src) {
   return src.map(r => ({
@@ -24,6 +25,7 @@ class RouteState {
     this.landingRouteVisible = new Array(LANDING_ROUTES.length).fill(false);
 
     this.crewVisible = new Array(CREW_MEMBERS.length).fill(true);
+    this.crewActiveVisible = new Array(CREW_ROUTES.length).fill(true);
 
     /** Progress ratio 0–1 for route marker. */
     this.t = 0;
@@ -61,6 +63,21 @@ class RouteState {
       if (r.points) clone.points = r.points.map(p => ({ ...p }));
       return clone;
     });
+
+    // ── Catapult crew visualization state ──────────────────────────────
+    this.catCrewVisible = false;
+    this.catCrewCatapult = 0;    // 0..3
+    this.catCrewPhase = 5;       // index into CATAPULT_PHASES (default: occupy_cat)
+    this.catCrewT = 1;           // slider 0..1 within phase route
+
+    // ── Catapult crew route editing state ────────────────────────────
+    this.catCrewEditMode = false;
+    this.catCrewEditMember = -1;       // index into crew.members[]
+    this.catCrewDraggingPoint = -1;    // index of waypoint being dragged
+    this.catCrewSelectedPoint = -1;    // last-selected waypoint for highlight
+
+    /** @type {Array|null} Snapshot for revert */
+    this._originalCatCrews = null;
 
     /** @type {Set<() => void>} */
     this._listeners = new Set();
@@ -139,6 +156,20 @@ class RouteState {
     return this.crewVisible.every(Boolean);
   }
 
+  toggleCrewActive(i) {
+    this.crewActiveVisible[i] = !this.crewActiveVisible[i];
+    this._notify();
+  }
+
+  setAllCrewActive(on) {
+    this.crewActiveVisible.fill(on);
+    this._notify();
+  }
+
+  allCrewActiveVisible() {
+    return this.crewActiveVisible.every(Boolean);
+  }
+
   // ── Selection / editing ─────────────────────────────────────────────
 
   selectRoute(type, i) {
@@ -153,6 +184,8 @@ class RouteState {
       this.hoveredCrewPointIdx = -1;
       this.draggingCrew = false;
     }
+    // Mutual exclusivity: exit cat crew edit
+    if (this.catCrewEditMode) this._resetCatCrewEdit();
     this.selectedRouteType = type;
     this.selectedRoute = i;
     this._notify();
@@ -169,7 +202,8 @@ class RouteState {
   // ── Crew editing ──────────────────────────────────────────────────
 
   enterCrewEdit() {
-    // Mutual exclusivity: exit route edit when entering crew edit
+    // Mutual exclusivity: exit cat crew edit and route edit
+    if (this.catCrewEditMode) this._resetCatCrewEdit();
     if (this.selectedRoute >= 0) {
       this.selectedRouteType = null;
       this.selectedRoute = -1;
@@ -427,6 +461,150 @@ class RouteState {
     return orig.points.some((p, j) =>
       p.x !== curr.points[j].x || p.y !== curr.points[j].y || p.v !== curr.points[j].v
     );
+  }
+
+  // ── Catapult crew methods ────────────────────────────────────────────
+  setCatCrewCatapult(i) {
+    if (this.catCrewEditMode) this._resetCatCrewEdit();
+    this.catCrewCatapult = i;
+    this._notify();
+  }
+  setCatCrewPhase(p) {
+    if (this.catCrewEditMode) this._resetCatCrewEdit();
+    this.catCrewPhase = p;
+    this._notify();
+  }
+  setCatCrewT(t)        { this.catCrewT = t; this._notify(); }
+  toggleCatCrewVisible() { this.catCrewVisible = !this.catCrewVisible; this._notify(); }
+
+  // ── Catapult crew route editing ────────────────────────────────────
+
+  _resetCatCrewEdit() {
+    this.catCrewEditMode = false;
+    this.catCrewEditMember = -1;
+    this.catCrewDraggingPoint = -1;
+    this.catCrewSelectedPoint = -1;
+  }
+
+  enterCatCrewEdit(memberIdx) {
+    // Mutual exclusivity: exit route edit and crew edit
+    if (this.selectedRoute >= 0) {
+      this.selectedRouteType = null;
+      this.selectedRoute = -1;
+      this.draggingPoint = -1;
+    }
+    if (this.crewEditMode) {
+      this.crewEditMode = false;
+      this.selectedCrewType = null;
+      this.selectedCrewIdx = -1;
+      this.selectedCrewPointIdx = -1;
+      this.hoveredCrewType = null;
+      this.hoveredCrewIdx = -1;
+      this.hoveredCrewPointIdx = -1;
+      this.draggingCrew = false;
+    }
+    this.catCrewEditMode = true;
+    this.catCrewEditMember = memberIdx;
+    this.catCrewDraggingPoint = -1;
+    this.catCrewSelectedPoint = -1;
+    this._notify();
+  }
+
+  exitCatCrewEdit() {
+    this._resetCatCrewEdit();
+    this._notify();
+  }
+
+  /** Get the route object currently being edited. */
+  getCatCrewEditRoute() {
+    const crew = CATAPULT_CREWS[this.catCrewCatapult];
+    if (!crew || this.catCrewEditMember < 0) return null;
+    const member = crew.members[this.catCrewEditMember];
+    if (!member) return null;
+    const phase = CATAPULT_PHASES[this.catCrewPhase];
+    return findPhaseRoute(member, phase);
+  }
+
+  getCatCrewEditMember() {
+    const crew = CATAPULT_CREWS[this.catCrewCatapult];
+    if (!crew || this.catCrewEditMember < 0) return null;
+    return crew.members[this.catCrewEditMember] || null;
+  }
+
+  moveCatCrewWaypoint(pointIdx, x, y) {
+    const route = this.getCatCrewEditRoute();
+    if (!route || !route.points[pointIdx]) return;
+    route.points[pointIdx].x = x;
+    route.points[pointIdx].y = y;
+    // Only recalc tangent for the moved point — preserve neighbors' original tangents
+    recalcTangents(route.points, [pointIdx]);
+    this._notify();
+  }
+
+  addCatCrewWaypoint(afterIdx, x, y) {
+    const route = this.getCatCrewEditRoute();
+    if (!route) return;
+    const newIdx = afterIdx + 1;
+    const h = route.points[afterIdx]?.h ?? 20.1494140625;
+    route.points.splice(newIdx, 0, { x, h, y, vx: 0, vy: 0, vz: 0 });
+    // Only recalc tangent for the new point — preserve existing points' original tangents
+    recalcTangents(route.points, [newIdx]);
+    this._notify();
+  }
+
+  removeCatCrewWaypoint(pointIdx) {
+    const route = this.getCatCrewEditRoute();
+    if (!route || route.points.length <= 2) return;
+    route.points.splice(pointIdx, 1);
+    if (this.catCrewSelectedPoint >= route.points.length) {
+      this.catCrewSelectedPoint = route.points.length - 1;
+    }
+    // Don't recalc neighbors — preserve their original tangents
+    this._notify();
+  }
+
+  /** Snapshot catapult crews for revert. */
+  refreshCatCrewSnapshots() {
+    this._originalCatCrews = CATAPULT_CREWS.map(c => ({
+      name: c.name,
+      members: c.members.map(m => ({
+        ...m,
+        position: { ...m.position },
+        routes: m.routes.map(r => ({
+          ...r,
+          points: r.points.map(p => ({ ...p })),
+        })),
+      })),
+    }));
+  }
+
+  isCatCrewMemberModified(catIdx, memberIdx) {
+    if (!this._originalCatCrews) return false;
+    const orig = this._originalCatCrews[catIdx]?.members[memberIdx];
+    const curr = CATAPULT_CREWS[catIdx]?.members[memberIdx];
+    if (!orig || !curr) return false;
+    for (let ri = 0; ri < orig.routes.length; ri++) {
+      const oRoute = orig.routes[ri];
+      const cRoute = curr.routes[ri];
+      if (!cRoute) return true;
+      if (oRoute.points.length !== cRoute.points.length) return true;
+      if (oRoute.points.some((p, j) =>
+        p.x !== cRoute.points[j].x || p.y !== cRoute.points[j].y
+      )) return true;
+    }
+    return false;
+  }
+
+  revertCatCrewMember(catIdx, memberIdx) {
+    if (!this._originalCatCrews) return;
+    const orig = this._originalCatCrews[catIdx]?.members[memberIdx];
+    const curr = CATAPULT_CREWS[catIdx]?.members[memberIdx];
+    if (!orig || !curr) return;
+    curr.routes = orig.routes.map(r => ({
+      ...r,
+      points: r.points.map(p => ({ ...p })),
+    }));
+    this._notify();
   }
 }
 

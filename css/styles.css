@@ -484,3 +484,22 @@ button:hover { background: #f1efe8; }
 }
 .route-revert-btn:hover:not(:disabled) { background: #fcebeb; color: #a32d2d; }
 .route-revert-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ── Catapult Crew panel ─────────────────────────────────────────────── */
+.cat-selector, .phase-selector {
+  display: flex; gap: 4px; margin-bottom: 6px;
+}
+.cat-btn, .phase-btn {
+  flex: 1; padding: 3px 6px; font-size: 11px; border: 0.5px solid #b4b2a9;
+  border-radius: 6px; background: #fff; cursor: pointer; color: #5f5e5a;
+  text-align: center; transition: background 0.15s;
+}
+.cat-btn:hover, .phase-btn:hover { background: #f0efeb; }
+.cat-btn.active { background: #1a1a18; color: #fff; border-color: #1a1a18; }
+.phase-btn.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.cat-slider-row {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 11px; color: #5f5e5a;
+}
+.cat-slider-row input[type="range"] { flex: 1; }
+.cat-slider-label { font-size: 11px; white-space: nowrap; }
+.cat-slider-val { font-size: 11px; min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }

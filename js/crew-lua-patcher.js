@@ -188,11 +188,176 @@ export function patchCrewLua(originalText, members, routes, headerComment) {
   return lua;
 }
 
+// ── Catapult crew patching ─────────────────────────────────────────────────
+
 /**
- * Download patched crew.lua as a file.
+ * Find all catapult crew route points blocks in the ["crew"] section.
+ * Returns array of { catIdx, memberIdx, routeIdx, ptsStart, ptsEnd }
+ * where ptsStart/ptsEnd delimit the content between { } of ["points"].
  */
-export function downloadPatchedCrewLua(originalText, members, routes, headerComment) {
-  const patched = patchCrewLua(originalText, members, routes, headerComment);
+function findCatCrewRoutePointsBlocks(lua) {
+  const crewKey = '["crew"]';
+  const crewIdx = lua.indexOf(crewKey);
+  if (crewIdx < 0) return [];
+
+  const crewOpen = lua.indexOf('{', crewIdx + crewKey.length);
+  if (crewOpen < 0) return [];
+  const crewClose = findMatchingBrace(lua, crewOpen);
+
+  const blocks = [];
+
+  // Find catapult entries [N] = { ... }
+  const catRe = /\[(\d+)\]\s*=\s*\{/g;
+  const crewSection = lua.slice(crewOpen, crewClose + 1);
+  let catMatch;
+  while ((catMatch = catRe.exec(crewSection)) !== null) {
+    const catLuaIdx = parseInt(catMatch[1]);
+    const catBraceStart = crewOpen + catMatch.index + catMatch[0].length - 1;
+    const catBraceEnd = findMatchingBrace(lua, catBraceStart);
+    if (catBraceEnd < 0) continue;
+
+    // Find ["members"] within this catapult
+    const catContent = lua.slice(catBraceStart, catBraceEnd + 1);
+    const membersKeyIdx = catContent.indexOf('["members"]');
+    if (membersKeyIdx < 0) continue;
+    const membersOpen = catContent.indexOf('{', membersKeyIdx + 11);
+    if (membersOpen < 0) continue;
+    const absMembersOpen = catBraceStart + membersOpen;
+    const absMembersClose = findMatchingBrace(lua, absMembersOpen);
+
+    // Find member entries
+    const membersSection = lua.slice(absMembersOpen, absMembersClose + 1);
+    const memRe = /\[(\d+)\]\s*=\s*\{/g;
+    let memMatch;
+    while ((memMatch = memRe.exec(membersSection)) !== null) {
+      const memLuaIdx = parseInt(memMatch[1]);
+      const memBraceStart = absMembersOpen + memMatch.index + memMatch[0].length - 1;
+      const memBraceEnd = findMatchingBrace(lua, memBraceStart);
+      if (memBraceEnd < 0) continue;
+
+      // Find ["routes"] within this member
+      const memContent = lua.slice(memBraceStart, memBraceEnd + 1);
+      const routesKeyIdx = memContent.indexOf('["routes"]');
+      if (routesKeyIdx < 0) continue;
+      const routesOpen = memContent.indexOf('{', routesKeyIdx + 10);
+      if (routesOpen < 0) continue;
+      const absRoutesOpen = memBraceStart + routesOpen;
+      const absRoutesClose = findMatchingBrace(lua, absRoutesOpen);
+
+      // Find route entries
+      const routesSection = lua.slice(absRoutesOpen, absRoutesClose + 1);
+      const rtRe = /\[(\d+)\]\s*=\s*\{/g;
+      let rtMatch;
+      while ((rtMatch = rtRe.exec(routesSection)) !== null) {
+        const rtLuaIdx = parseInt(rtMatch[1]);
+        const rtBraceStart = absRoutesOpen + rtMatch.index + rtMatch[0].length - 1;
+        const rtBraceEnd = findMatchingBrace(lua, rtBraceStart);
+        if (rtBraceEnd < 0) continue;
+
+        // Find ["points"] within this route
+        const rtContent = lua.slice(rtBraceStart, rtBraceEnd + 1);
+        const ptsKeyIdx = rtContent.indexOf('["points"]');
+        if (ptsKeyIdx < 0) continue;
+        const ptsOpen = rtContent.indexOf('{', ptsKeyIdx + 10);
+        if (ptsOpen < 0) continue;
+        const absPtsOpen = rtBraceStart + ptsOpen;
+        const absPtsClose = findMatchingBrace(lua, absPtsOpen);
+
+        blocks.push({
+          catIdx: catLuaIdx - 1,
+          memberIdx: memLuaIdx - 1,
+          routeIdx: rtLuaIdx - 1,
+          ptsStart: absPtsOpen + 1,   // after '{'
+          ptsEnd: absPtsClose,        // the '}'
+        });
+
+        rtRe.lastIndex = rtBraceStart + (rtBraceEnd - rtBraceStart) + 1 - absRoutesOpen;
+      }
+
+      memRe.lastIndex = memBraceStart + (memBraceEnd - memBraceStart) + 1 - absMembersOpen;
+    }
+
+    catRe.lastIndex = catBraceStart + (catBraceEnd - catBraceStart) + 1 - crewOpen;
+  }
+
+  return blocks;
+}
+
+/**
+ * Build replacement text for a catapult crew route's points block.
+ * Each point: [N] = { [1]=x, [2]=deckHeight, [3]=z, [4]=vx, [5]=vy, [6]=vz }
+ */
+function buildCatCrewRoutePoints(points) {
+  if (!points || points.length === 0) return '\n                            ';
+  const lines = points.map((p, i) => {
+    const h = p.h != null ? p.h : 20.1494140625;  // preserve original deck height per point
+    return `\n                                [${i + 1}] = {\n                                    [1] = ${p.x},\n                                    [2] = ${h},\n                                    [3] = ${p.y},\n                                    [4] = ${p.vx || 0},\n                                    [5] = ${p.vy || 0},\n                                    [6] = ${p.vz || 0},\n                                },`;
+  });
+  return lines.join('') + '\n                            ';
+}
+
+/**
+ * Check if a route's points have been modified from the original snapshot.
+ */
+function isCatRouteModified(orig, curr) {
+  if (!orig || !curr) return true;
+  if (orig.points.length !== curr.points.length) return true;
+  return orig.points.some((p, j) =>
+    p.x !== curr.points[j].x || p.y !== curr.points[j].y ||
+    p.vx !== curr.points[j].vx || p.vy !== curr.points[j].vy || p.vz !== curr.points[j].vz
+  );
+}
+
+/**
+ * Patch catapult crew route points into crew.lua text.
+ * Only patches routes that were actually modified (compared to originalCatCrews snapshot).
+ */
+export function patchCatCrewLua(lua, catapultCrews, originalCatCrews) {
+  const blocks = findCatCrewRoutePointsBlocks(lua);
+  if (blocks.length === 0) return lua;
+
+  const patches = [];
+  for (const block of blocks) {
+    const crew = catapultCrews[block.catIdx];
+    if (!crew) continue;
+    const member = crew.members[block.memberIdx];
+    if (!member) continue;
+    const route = member.routes[block.routeIdx];
+    if (!route) continue;
+
+    // Only patch if modified from original
+    const origCrew = originalCatCrews?.[block.catIdx];
+    const origMember = origCrew?.members[block.memberIdx];
+    const origRoute = origMember?.routes[block.routeIdx];
+    if (origRoute && !isCatRouteModified(origRoute, route)) continue;
+
+    const replacement = buildCatCrewRoutePoints(route.points);
+    patches.push({
+      start: block.ptsStart,
+      end: block.ptsEnd,
+      replacement,
+    });
+  }
+
+  if (patches.length === 0) return lua;
+
+  // Apply in reverse order
+  patches.sort((a, b) => b.start - a.start);
+  for (const p of patches) {
+    lua = lua.slice(0, p.start) + p.replacement + lua.slice(p.end);
+  }
+
+  return lua;
+}
+
+/**
+ * Download patched crew.lua as a file (includes both deck crew and catapult crew edits).
+ */
+export function downloadPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment) {
+  let patched = patchCrewLua(originalText, members, routes, headerComment);
+  if (catapultCrews && catapultCrews.length > 0) {
+    patched = patchCatCrewLua(patched, catapultCrews, originalCatCrews);
+  }
   const blob = new Blob([patched], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

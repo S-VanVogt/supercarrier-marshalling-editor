@@ -8,6 +8,7 @@ import { CREW_MEMBERS, LIVERY_COLOURS } from './crew-data.js';
 import { CREW_ROUTES, CREW_ACTIVE_LINKS } from './crew-routes-data.js';
 import { CATAPULT_COLORS, LANDING_COLOR } from './route-data.js';
 import { TAKEOFF_TASKS, PARKING_TASKS, TAKEOFF_USED_ROUTE_IDS, NON_TAKEOFF_LINKS } from './takeoff-tasks-data.js';
+import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs } from './catapult-crew-data.js';
 
 export class Renderer {
   /** @param {HTMLCanvasElement} canvas  @param {import('./viewport.js').Viewport} viewport */
@@ -15,6 +16,17 @@ export class Renderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.viewport = viewport;
+
+    // Load F-14 silhouette for route progress overlay
+    this._f14Img = new Image();
+    this._f14Img.src = 'assets/f14-folded.svg?v=' + Date.now();
+    this._f14Ready = false;
+    this._f14Img.onload = () => { this._f14Ready = true; };
+    // SVG dimensions: nose at x≈724, tail at x≈93, centerline y≈635
+    // Real F-14 length ≈ 19.1m. SVG length ≈ 631px. Scale: 19.1/631 ≈ 0.0303 world units/px
+    this._f14Scale = 19.1 / 631;
+    this._f14CenterX = (724 + 93) / 2;  // SVG center X
+    this._f14CenterY = 635;              // SVG centerline Y
   }
 
   get W() { return this.canvas.width; }
@@ -98,20 +110,14 @@ export class Renderer {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    for (const p of polygon) {
-      const c = this.wc(p.x, p.y);
-      ctx.beginPath(); ctx.arc(c.x, c.y, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(29,158,117,0.8)';
-      ctx.fill();
-    }
     ctx.restore();
   }
 
   // ── Catapult rectangles ──────────────────────────────────────────────────
   // Each: center (x,y), azimuth in degrees, length, width
   static CATAPULTS = [
-    { name: 'Cat 1', cx:  59.954,  cy:  18.020, azDeg: 354.3,   len: 107.8, wid: 2.0 },
-    { name: 'Cat 2', cx:  58.800,  cy:  -3.752, azDeg: 358.0,   len: 108.8, wid: 2.0 },
+    { name: 'Cat 1', cx:  59.954,  cy:  18.020, azDeg: 354.3,   len: 102.6, wid: 2.0 },
+    { name: 'Cat 2', cx:  58.800,  cy:  -3.752, azDeg: 358.0,   len: 102.5, wid: 2.0 },
     { name: 'Cat 3', cx: -37.374,  cy: -20.162, azDeg: 355.002, len: 112.0, wid: 2.0 },
     { name: 'Cat 4', cx: -56.176,  cy: -32.900, azDeg: 359.957, len: 108.0, wid: 2.0 },
   ];
@@ -192,6 +198,185 @@ export class Renderer {
       ctx.fillText(jbd.name, x + w / 2, y + h / 2);
       ctx.fillStyle = 'rgba(220,140,20,0.10)';
     }
+    ctx.restore();
+  }
+
+  // ── Deck markings (foul lines, landing area, elevators) ─────────────────
+
+  // Angled deck centerline: 9.5° off ship axis, anchored at round-down (-159, 9)
+  // Slope: dy/dx = -0.165
+  static LANDING_CENTERLINE = [
+    { x: -159, y: 9.0 }, { x: -120, y: 2.6 }, { x: -80, y: -4.0 },
+    { x: -40, y: -10.6 }, { x: 0, y: -17.2 }, { x: 40, y: -23.8 }, { x: 77, y: -30.0 },
+  ];
+
+  // Landing area outline (24m wide, 12m each side of centerline)
+  // Perpendicular offset at 9.5°: (±1.98, ±11.84)
+  static LANDING_AREA = [
+    // Port edge (stern to bow)
+    { x: -157.0, y: 20.8 }, { x: -118.0, y: 14.4 }, { x: -78.0, y: 7.8 },
+    { x: -38.0, y: 1.2 }, { x: 2.0, y: -5.4 }, { x: 42.0, y: -12.0 }, { x: 90.6, y: -20.0 },
+    // Starboard edge (bow to stern)
+    { x: 63.88, y: -40.0 }, { x: 38.0, y: -35.7 }, { x: -2.0, y: -29.1 },
+    { x: -42.0, y: -22.5 }, { x: -82.0, y: -15.9 }, { x: -122.0, y: -9.3 }, { x: -161.0, y: -2.8 },
+  ];
+
+  // Foul lines
+  static FOUL_LINE_1 = [
+    { x: -147.7, y: 22.3 }, { x: -110.6, y: 16.3 }, { x: -105.4, y: 19.6 },
+    { x: -68.9, y: 13.6 }, { x: -7.6, y: -1.0 }, { x: 104.2, y: -18.0 },
+  ];
+  static FOUL_LINE_2 = [
+    { x: 43.6, y: 9.7 }, { x: 166.8, y: 4.9 },
+  ];
+  static FOUL_LINE_3 = [
+    { x: 43.5, y: 6.5 }, { x: 165.1, y: -5.1 },
+  ];
+
+  // Elevators
+  static ELEVATORS = [
+    { name: 'El1', pts: [
+      { x: 16.6, y: 37.0 }, { x: 16.6, y: 21.5 }, { x: 37.8, y: 21.5 },
+      { x: 37.8, y: 29.0 }, { x: 42.3, y: 35.8 }, { x: 42.3, y: 37.0 },
+    ]},
+    { name: 'El2', pts: [
+      { x: -30.7, y: 37.0 }, { x: -30.7, y: 21.5 }, { x: -9.5, y: 21.5 },
+      { x: -9.5, y: 29.0 }, { x: -5.0, y: 35.8 }, { x: -5.0, y: 37.0 },
+    ]},
+    { name: 'El3', pts: [
+      { x: -109.5, y: 37.0 }, { x: -109.5, y: 21.5 }, { x: -88.3, y: 21.5 },
+      { x: -88.3, y: 29.0 }, { x: -83.8, y: 35.8 }, { x: -83.8, y: 37.0 },
+    ]},
+    { name: 'El4', pts: [
+      { x: -116.0, y: -37.0 }, { x: -116.0, y: -21.5 }, { x: -94.8, y: -21.5 },
+      { x: -94.8, y: -29.0 }, { x: -90.3, y: -35.8 }, { x: -90.3, y: -37.0 },
+    ]},
+  ];
+
+  drawDeckMarkings() {
+    const { ctx } = this;
+    ctx.save();
+    const refO = this.wc(0, 0);
+    const refR = this.wc(1, 0);
+    const pxPerWorld = Math.abs(refR.x - refO.x);
+
+    // Landing area outline (light fill + border)
+    ctx.beginPath();
+    const la0 = this.wc(Renderer.LANDING_AREA[0].x, Renderer.LANDING_AREA[0].y);
+    ctx.moveTo(la0.x, la0.y);
+    for (let i = 1; i < Renderer.LANDING_AREA.length; i++) {
+      const p = this.wc(Renderer.LANDING_AREA[i].x, Renderer.LANDING_AREA[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(140,140,140,0.06)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(140,140,140,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Angled deck centerline — 18 segments alternating yellow/white, no gaps
+    {
+      const clPts = Renderer.LANDING_CENTERLINE;
+      // Build dense point list by interpolating along polyline at 18 equal divisions
+      let totalLen = 0;
+      const cumLen = [0];
+      for (let i = 1; i < clPts.length; i++) {
+        const dx = clPts[i].x - clPts[i - 1].x;
+        const dy = clPts[i].y - clPts[i - 1].y;
+        totalLen += Math.sqrt(dx * dx + dy * dy);
+        cumLen.push(totalLen);
+      }
+      // Interpolate a point at a given arc-length distance
+      const ptAt = (dist) => {
+        for (let i = 1; i < cumLen.length; i++) {
+          if (dist <= cumLen[i]) {
+            const t = (dist - cumLen[i - 1]) / (cumLen[i] - cumLen[i - 1] || 1);
+            return {
+              x: clPts[i - 1].x + t * (clPts[i].x - clPts[i - 1].x),
+              y: clPts[i - 1].y + t * (clPts[i].y - clPts[i - 1].y),
+            };
+          }
+        }
+        return clPts[clPts.length - 1];
+      };
+      const nDashes = 18;
+      const colors = ['rgba(232,200,64,0.4)', 'rgba(255,255,255,0.4)']; // yellow, white
+      ctx.lineWidth = 1.0 * pxPerWorld; // 1m wide in world space
+      ctx.lineCap = 'butt';
+      for (let d = 0; d < nDashes; d++) {
+        const p0 = ptAt(d * totalLen / nDashes);
+        const p1 = ptAt((d + 1) * totalLen / nDashes);
+        const c0 = this.wc(p0.x, p0.y);
+        const c1 = this.wc(p1.x, p1.y);
+        ctx.beginPath();
+        ctx.moveTo(c0.x, c0.y);
+        ctx.lineTo(c1.x, c1.y);
+        ctx.strokeStyle = colors[d % 2];
+        ctx.stroke();
+      }
+    }
+
+    // Foul lines (dashed red/white, world-space width)
+    for (const foul of [Renderer.FOUL_LINE_1, Renderer.FOUL_LINE_2, Renderer.FOUL_LINE_3]) {
+      const dashWorld = 1.65 * pxPerWorld; // 1.65m dashes
+      ctx.lineWidth = 0.2 * pxPerWorld;
+      ctx.lineCap = 'butt';
+      // Red dashes
+      ctx.beginPath();
+      const f0 = this.wc(foul[0].x, foul[0].y);
+      ctx.moveTo(f0.x, f0.y);
+      for (let i = 1; i < foul.length; i++) {
+        const p = this.wc(foul[i].x, foul[i].y);
+        ctx.lineTo(p.x, p.y);
+      }
+      ctx.strokeStyle = 'rgba(255,60,60,0.3)';
+      ctx.setLineDash([dashWorld, dashWorld]);
+      ctx.stroke();
+      // White dashes (offset)
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineDashOffset = dashWorld;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+    }
+
+    // Elevators
+    ctx.font = 'bold 8px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const elev of Renderer.ELEVATORS) {
+      const pts = elev.pts.map(p => this.wc(p.x, p.y));
+      // Fill with closed path
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(180,160,100,0.08)';
+      ctx.fill();
+      // Stroke open path (skip closing segment)
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      const elevDash = 0.825 * pxPerWorld;
+      ctx.lineWidth = 0.2 * pxPerWorld;
+      ctx.lineCap = 'butt';
+      // Yellow dashes
+      ctx.strokeStyle = 'rgba(232,200,64,0.3)';
+      ctx.setLineDash([elevDash, elevDash]);
+      ctx.stroke();
+      // Red dashes (offset)
+      ctx.strokeStyle = 'rgba(255,60,60,0.3)';
+      ctx.lineDashOffset = elevDash;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+      ctx.fillStyle = 'rgba(180,160,100,0.7)';
+      ctx.fillText(elev.name, cx, cy);
+    }
+
     ctx.restore();
   }
 
@@ -371,6 +556,9 @@ export class Renderer {
           ctx.beginPath(); ctx.arc(cp.x, cp.y, 6, 0, Math.PI * 2);
           ctx.fillStyle = '#EF9F27'; ctx.fill();
           ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+
+          // F-14 silhouette overlay
+          this._drawF14Overlay(ctx, rpt, pts, false, t);
         }
       }
 
@@ -472,6 +660,9 @@ export class Renderer {
           ctx.beginPath(); ctx.arc(cp.x, cp.y, 6, 0, Math.PI * 2);
           ctx.fillStyle = '#EF9F27'; ctx.fill();
           ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+
+          // F-14 silhouette overlay
+          this._drawF14Overlay(ctx, rpt, pts, true, t);
         }
       }
 
@@ -501,6 +692,43 @@ export class Renderer {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, cx + r + 3, cy);
+  }
+
+  /** Draw F-14 silhouette at the route progress marker position. */
+  _drawF14Overlay(ctx, rpt, pts, landing, t) {
+    if (!this._f14Ready) { console.warn('F14 image not ready'); return; }
+
+    const si = rpt.segIndex;
+    const dx = pts[si + 1].x - pts[si].x;
+    const dy = pts[si + 1].y - pts[si].y;
+    let heading = Math.atan2(dy, dx); // radians, 0 = right (nose direction)
+    // At t=1.0 on landing routes, plane has parked — rotate 180°
+    if (landing && t >= 1.0) heading += Math.PI;
+
+    // World-space dimensions of the full SVG image
+    const imgW = 847 * this._f14Scale;
+    const imgH = 1200 * this._f14Scale;
+
+    // Pixels per world unit at this position
+    const refR = this.wc(rpt.x + 1, rpt.y);
+    const refO = this.wc(rpt.x, rpt.y);
+    const pxPerWorld = Math.abs(refR.x - refO.x);
+
+    const drawW = imgW * pxPerWorld;
+    const drawH = imgH * pxPerWorld;
+
+    // Offset from SVG top-left to aircraft center (in canvas pixels)
+    const offsetX = this._f14CenterX * this._f14Scale * pxPerWorld;
+    const offsetY = this._f14CenterY * this._f14Scale * pxPerWorld;
+
+    const cp = this.wc(rpt.x, rpt.y);
+    ctx.save();
+    ctx.translate(cp.x, cp.y);
+    ctx.rotate(heading);
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(this._f14Img, -offsetX, -offsetY, drawW, drawH);
+    ctx.globalAlpha = 1.0;
+    ctx.restore();
   }
 
   _drawActivePoint(ctx, cx, cy, angle, pal, r) {
@@ -543,6 +771,7 @@ export class Renderer {
     for (const link of CREW_ACTIVE_LINKS) {
       const mi = link.memberIdx;
       if (rs && !rs.crewVisible[mi]) continue;
+      if (rs && !rs.crewActiveVisible[link.routeId]) continue;
 
       const member = CREW_MEMBERS[mi];
       const route = CREW_ROUTES[link.routeId];
@@ -673,6 +902,7 @@ export class Renderer {
     for (const link of NON_TAKEOFF_LINKS) {
       const mi = link.memberId;
       if (!rs.crewVisible[mi]) continue;
+      if (!rs.crewActiveVisible[link.routeId]) continue;
 
       const member = CREW_MEMBERS[mi];
       const route = CREW_ROUTES[link.routeId];
@@ -926,6 +1156,7 @@ export class Renderer {
     this.ctx.clearRect(0, 0, this.W, this.H);
     this.drawGrid();
     this.drawPolygon();
+    this.drawDeckMarkings();
     this.drawCatapults();
     this.drawJBDs();
     this.drawUnusedRoutePositions(routeState);
@@ -935,5 +1166,164 @@ export class Renderer {
     this.drawTakeoffRoutes(routeState, routeState ? routeState.t : 0.5);
     this.drawActiveCrewLines(routeState);
     this.drawActiveParkingCrewLines(routeState);
+    this.drawCatapultCrew(routeState);
+  }
+
+  // ── Catapult Crew Overlay ──────────────────────────────────────────────
+
+  drawCatapultCrew(rs) {
+    if (!rs || !rs.catCrewVisible) return;
+    const crew = CATAPULT_CREWS[rs.catCrewCatapult];
+    if (!crew || !crew.members.length) return;
+
+    const ctx = this.ctx;
+    const phase = CATAPULT_PHASES[rs.catCrewPhase];
+
+    // Draw route paths first (behind dots)
+    const editMi = rs.catCrewEditMode ? rs.catCrewEditMember : -1;
+    for (let mi = 0; mi < crew.members.length; mi++) {
+      const member = crew.members[mi];
+      const route = findPhaseRoute(member, phase);
+      if (!route || route.points.length < 2) continue;
+      const isEdited = mi === editMi;
+      const colors = CATAPULT_MEMBER_COLORS[member.name] || { fill: '#aaa', stroke: '#888' };
+      ctx.save();
+      if (isEdited) {
+        ctx.setLineDash([]);
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = colors.stroke;
+      } else {
+        ctx.setLineDash([4, 3]);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#aaa';
+      }
+      ctx.beginPath();
+      for (let pi = 0; pi < route.points.length; pi++) {
+        const p = this.wc(route.points[pi].x, route.points[pi].y);
+        if (pi === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+
+      // Draw waypoint dots
+      if (isEdited) {
+        const sz = 5;
+        for (let pi = 0; pi < route.points.length; pi++) {
+          const p = this.wc(route.points[pi].x, route.points[pi].y);
+          const isSel = pi === rs.catCrewSelectedPoint;
+          ctx.fillStyle = isSel ? colors.fill : '#fff';
+          ctx.strokeStyle = colors.stroke;
+          ctx.lineWidth = isSel ? 2.5 : 1.5;
+          ctx.fillRect(p.x - sz, p.y - sz, sz * 2, sz * 2);
+          ctx.strokeRect(p.x - sz, p.y - sz, sz * 2, sz * 2);
+        }
+      } else {
+        // Small gray dots on unselected routes
+        for (let pi = 0; pi < route.points.length; pi++) {
+          const p = this.wc(route.points[pi].x, route.points[pi].y);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+          ctx.fillStyle = '#bbb';
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
+
+    // Compute per-member local t values based on path lengths
+    const localTs = memberLocalTs(crew, phase, rs.catCrewT);
+
+    for (let mi = 0; mi < crew.members.length; mi++) {
+      const member = crew.members[mi];
+      const colors = CATAPULT_MEMBER_COLORS[member.name] || { fill: '#aaa', stroke: '#888' };
+
+      // Find route for this phase by name suffix
+      const route = findPhaseRoute(member, phase);
+      const t = localTs[mi];
+
+      // Determine position for this phase
+      let wx, wy, hdg;
+      if (phase.useFastStart) {
+        // Fast start phase — show at fast_start_position (or idle if missing)
+        const fsp = member.fastStartPosition;
+        if (fsp) {
+          wx = fsp.x; wy = fsp.y; hdg = fsp.hdg;
+        } else {
+          wx = member.position.x; wy = member.position.y; hdg = member.position.hdg;
+        }
+      } else if (!route || route.points.length === 0) {
+        // Idle or empty route — show at idle position
+        wx = member.position.x;
+        wy = member.position.y;
+        hdg = member.position.hdg;
+      } else {
+        const pts = route.points;
+        if (t >= 1 || pts.length === 1) {
+          // At destination (last point)
+          const last = pts[pts.length - 1];
+          wx = last.x;
+          wy = last.y;
+          hdg = route.finalHeading || member.position.hdg;
+        } else if (t <= 0) {
+          // At start — face toward next point
+          wx = pts[0].x;
+          wy = pts[0].y;
+          const dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y;
+          hdg = Math.atan2(dy, dx) * 180 / Math.PI;
+        } else {
+          // Interpolate along waypoints by arc length
+          const totalSegs = pts.length - 1;
+          const rawIdx = t * totalSegs;
+          const segIdx = Math.min(Math.floor(rawIdx), totalSegs - 1);
+          const segT = rawIdx - segIdx;
+          const a = pts[segIdx], b = pts[segIdx + 1];
+          wx = a.x + (b.x - a.x) * segT;
+          wy = a.y + (b.y - a.y) * segT;
+          // Face movement direction
+          const dx = b.x - a.x, dy = b.y - a.y;
+          hdg = Math.atan2(dy, dx) * 180 / Math.PI;
+        }
+      }
+
+      const c = this.wc(wx, wy);
+      const r = 7;
+
+      // Draw diamond (rotated square)
+      const rad = hdg * Math.PI / 180;
+      ctx.save();
+      ctx.translate(c.x, c.y);
+
+      // Diamond shape
+      ctx.beginPath();
+      ctx.moveTo(0, -r);
+      ctx.lineTo(r, 0);
+      ctx.lineTo(0, r);
+      ctx.lineTo(-r, 0);
+      ctx.closePath();
+      ctx.fillStyle = colors.fill;
+      ctx.fill();
+      ctx.strokeStyle = colors.stroke;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Heading tick
+      const tickLen = r + 6;
+      const tx = Math.cos(-rad) * tickLen;
+      const ty = Math.sin(-rad) * tickLen;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(tx, ty);
+      ctx.strokeStyle = colors.stroke;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Label
+      ctx.fillStyle = colors.stroke;
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(member.name, c.x, c.y - r - 4);
+    }
   }
 }

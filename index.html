@@ -69,7 +69,7 @@
 
   <!-- Crew: 2-column (Idle | Active) -->
   <details class="panel" id="panel-crew">
-    <summary>Crew</summary>
+    <summary>Deck Marshalling Crew</summary>
     <div class="panels-columns cols-2">
       <div class="panel-col">
         <div class="col-header">
@@ -85,6 +85,38 @@
         </div>
         <div class="route-list" id="crew-active-list"></div>
       </div>
+    </div>
+  </details>
+
+  <!-- Catapult Crew -->
+  <details class="panel" id="panel-catapult-crew">
+    <summary>
+      <span>Catapult Crew</span>
+      <label class="show-all-check" style="margin-left:auto">
+        Show <input type="checkbox" id="chk-catcrew-visible">
+      </label>
+    </summary>
+    <div class="panel-body">
+      <div class="cat-selector">
+        <button class="cat-btn active" data-cat="0">Cat 1</button>
+        <button class="cat-btn" data-cat="1">Cat 2</button>
+        <button class="cat-btn" data-cat="2">Cat 3</button>
+        <button class="cat-btn" data-cat="3">Cat 4</button>
+      </div>
+      <div class="phase-selector">
+        <button class="phase-btn" data-phase="0">Idle</button>
+        <button class="phase-btn" data-phase="1">Fast Start</button>
+        <button class="phase-btn" data-phase="2">Launch</button>
+        <button class="phase-btn" data-phase="3">Initial</button>
+        <button class="phase-btn" data-phase="4">Free Cat</button>
+        <button class="phase-btn active" data-phase="5">Occupy</button>
+      </div>
+      <div class="cat-slider-row">
+        <span class="cat-slider-label">Route t</span>
+        <input type="range" id="cat-crew-slider" min="0" max="1" step="0.01" value="1">
+        <span id="cat-crew-t-value" class="cat-slider-val">1.00</span>
+      </div>
+      <div class="route-list" id="catcrew-member-list"></div>
     </div>
   </details>
 

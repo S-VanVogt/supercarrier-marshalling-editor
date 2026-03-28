@@ -277,6 +277,103 @@ function parseParkingTasks(section) {
   return tasks;
 }
 
+// ── Catapult Crew Parser ─────────────────────────────────────────────────────
+
+/**
+ * Parse the ["crew"] section of crew.lua — catapult crew (4 catapults × 6 members).
+ * @param {string} lua  Raw crew.lua text
+ * @returns {Array<{name, members: Array<{name, position, fastStartPosition, routes}>}>}
+ */
+export function parseCatapultCrew(lua) {
+  // Strip comments
+  lua = lua.replace(/--\[\[[\s\S]*?(?:\]\]--|--\]\])/g, '');
+  lua = lua.replace(/--[^\n]*/g, '');
+
+  const crewSection = extractSection(lua, '["crew"]');
+  if (!crewSection) return [];
+
+  const catapults = [];
+  const catEntries = findTopLevelEntries(crewSection);
+
+  for (const catBlock of catEntries) {
+    // Strip ["members"] block to avoid picking up nested ["name"] values
+    const membersBlock = extractSection(catBlock, '["members"]');
+    const catBlockNoMembers = membersBlock
+      ? catBlock.replace(membersBlock, '')
+      : catBlock;
+    const catName = extractString(catBlockNoMembers, '["name"]') || `crew_${catapults.length}`;
+    if (!membersBlock) { catapults.push({ name: catName, members: [] }); continue; }
+
+    const members = [];
+    const memberEntries = findTopLevelEntries(membersBlock);
+
+    for (const mBlock of memberEntries) {
+      // Member ["name"] comes AFTER ["routes"] in crew.lua, so strip routes
+      // block first to avoid picking up a route's ["name"] instead.
+      const routesSectionForName = extractSection(mBlock, '["routes"]');
+      const mBlockNoRoutes = routesSectionForName
+        ? mBlock.replace(routesSectionForName, '')
+        : mBlock;
+      const name = extractString(mBlockNoRoutes, '["name"]') || `member_${members.length}`;
+
+      // Position: {[1]=x, [2]=deckHeight, [3]=z, [4]=hdg}
+      const posBlock = extractSection(mBlock, '["position"]');
+      const posNums = posBlock ? extractNumberArray(posBlock) : [0, 0, 0, 0];
+      const position = { x: posNums[0], y: posNums[2], hdg: posNums[3] || 0 };
+
+      // Fast start position
+      const fspBlock = extractSection(mBlock, '["fast_start_position"]');
+      const fspNums = fspBlock ? extractNumberArray(fspBlock) : null;
+      const fastStartPosition = fspNums ? { x: fspNums[0], y: fspNums[2], hdg: fspNums[3] || 0 } : null;
+
+      // Angles
+      const anglesBlock = extractSection(mBlock, '["angles"]');
+      const angles = anglesBlock ? extractNumberArray(anglesBlock) : [];
+
+      // Routes: each has optional name, points[], final_heading
+      const routesBlock = extractSection(mBlock, '["routes"]');
+      const routes = [];
+      if (routesBlock) {
+        const routeEntries = findTopLevelEntries(routesBlock);
+        for (const rBlock of routeEntries) {
+          const rName = extractString(rBlock, '["name"]') || '';
+          const finalHeading = extractNumber(rBlock, '["final_heading"]');
+
+          const pointsBlock = extractSection(rBlock, '["points"]');
+          const points = [];
+          if (pointsBlock) {
+            const ptEntries = findTopLevelEntries(pointsBlock);
+            for (const ptBlock of ptEntries) {
+              const nums = extractNumberArray(ptBlock);
+              if (nums.length >= 3) {
+                points.push({
+                  x: nums[0],      // [1] = x
+                  h: nums[1],      // [2] = deck height (preserved for export)
+                  y: nums[2],      // [3] = z → viewport y
+                  vx: nums[3] || 0,  // [4]
+                  vy: nums[4] || 0,  // [5]
+                  vz: nums[5] || 0,  // [6]
+                });
+              }
+            }
+          }
+
+          routes.push({ name: rName, points, finalHeading });
+        }
+      }
+
+      const livery = extractString(mBlock, '["livery"]') || '';
+      const modelName = extractString(mBlock, '["model_name"]') || '';
+
+      members.push({ name, position, fastStartPosition, angles, routes, livery, modelName });
+    }
+
+    catapults.push({ name: catName, members });
+  }
+
+  return catapults;
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /**

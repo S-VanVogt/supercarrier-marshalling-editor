@@ -135,3 +135,6 @@ grid → polygon → catapults → JBDs → unusedRoutePositions → crewActiveP
 - `polyline-app-backup-v7` — After editable crew positions/heading with crew.lua export
 - `polyline-app-backup-v8` — After click-to-enter edit modes, route cycling, crew index labels
 - `polyline-app-backup-v9` — After UI overhaul: 3-column layout, crew panel improvements, banner layout
+- `polyline-app-backup-v10` — (created in earlier session)
+- `polyline-app-backup-v11` — (created in earlier session)
+- `polyline-app-backup-v12` — After F-14 silhouette overlay on route progress marker, 180° rotation on landing at t=1.0
