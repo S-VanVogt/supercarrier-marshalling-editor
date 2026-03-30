@@ -94,6 +94,9 @@ export class UI {
             const routes = parseTakeoffRoutes(text);
             this.rs.loadTakeoffRoutes(routes);
             this._originalLuaText = text;
+            // Parse SC-Config stamp for version overlay
+            const stamp = this._parseScConfigStamp(text);
+            if (stamp) this.rs.loadedVariant = stamp;
             this._rebuildRouteList();
           } catch (err) {
             alert('Failed to parse Lua file: ' + err.message);
@@ -134,6 +137,87 @@ export class UI {
       if (!this._originalCrewLuaText) { alert('crew.lua not imported yet.'); return; }
       const headerComment = document.getElementById('crew-header-comment').value.trim();
       downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment);
+    });
+
+    // ── Config I/O (folder-based) ──────────────────────────────────────
+    document.getElementById('btn-import-config').addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.webkitdirectory = true;
+      input.addEventListener('change', () => {
+        const files = Array.from(input.files);
+        const crewFile = files.find(f => f.name === 'crew.lua');
+        const rrFile = files.find(f => f.name === 'USS_Nimitz_RunwaysAndRoutes.lua');
+        if (!crewFile && !rrFile) {
+          alert('No crew.lua or USS_Nimitz_RunwaysAndRoutes.lua found in selected folder.');
+          return;
+        }
+        const promises = [];
+        if (rrFile) promises.push(rrFile.text().then(text => {
+          const routes = parseTakeoffRoutes(text);
+          this.rs.loadTakeoffRoutes(routes);
+          this._originalLuaText = text;
+          this._rebuildRouteList();
+          const stamp = this._parseScConfigStamp(text);
+          if (stamp) this.rs.loadedVariant = stamp;
+        }));
+        if (crewFile) promises.push(crewFile.text().then(text => {
+          this._importCrewLua(text);
+        }));
+        Promise.all(promises).then(() => {
+          this.rs.refreshRouteSnapshots();
+          this.rs._notify();
+          const loaded = [rrFile && 'RunwaysAndRoutes', crewFile && 'crew.lua'].filter(Boolean).join(' + ');
+          console.log(`Config imported: ${loaded}`);
+        }).catch(err => {
+          alert('Failed to import config: ' + err.message);
+        });
+      });
+      input.click();
+    });
+
+    document.getElementById('btn-export-config').addEventListener('click', () => {
+      if (!this._originalLuaText && !this._originalCrewLuaText) {
+        alert('No files loaded yet.'); return;
+      }
+      const form = document.getElementById('export-stamp-form');
+      const verInput = document.getElementById('export-stamp-ver');
+      // Pre-fill version from loaded variant (auto-increment)
+      const lv = this.rs.loadedVariant;
+      if (lv && lv.version) {
+        const m = lv.version.match(/^(v\d+\.)(\d+)$/);
+        verInput.value = m ? m[1] + (parseInt(m[2]) + 1) : lv.version;
+      } else {
+        verInput.value = 'v0.1';
+      }
+      document.getElementById('export-stamp-notes').value = this._lastStampNotes || '';
+      form.style.display = '';
+    });
+
+    document.getElementById('btn-export-stamp-apply').addEventListener('click', () => {
+      const ver = document.getElementById('export-stamp-ver').value.trim();
+      const notes = document.getElementById('export-stamp-notes').value.trim();
+      const lv = this.rs.loadedVariant;
+      const name = lv ? lv.name : 'Unknown';
+      const date = new Date().toISOString().slice(0, 10);
+      let stamp = `-- [SC-Config] ${name} ${ver}\n`;
+      stamp += `-- [SC-Config] Modified: ${date}\n`;
+      if (notes) stamp += `-- [SC-Config] Notes: ${notes}\n`;
+      if (this._originalLuaText) {
+        downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp);
+      }
+      if (this._originalCrewLuaText) {
+        downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp);
+      }
+      // Update loaded variant and save notes for next export
+      this.rs.loadedVariant = { name, version: ver };
+      this._lastStampNotes = notes;
+      this.rs._notify();
+      document.getElementById('export-stamp-form').style.display = 'none';
+    });
+
+    document.getElementById('btn-export-stamp-cancel').addEventListener('click', () => {
+      document.getElementById('export-stamp-form').style.display = 'none';
     });
 
     // Crew edit mode button (optional, may not exist)
@@ -400,8 +484,27 @@ export class UI {
     }
   }
 
+  _parseScConfigStamp(text) {
+    // Try versioned format: Name v1.0
+    const mv = text.match(/^--\s*\[SC-Config\]\s+(\S+)\s+(v\S+)/m);
+    if (mv) {
+      const n = text.match(/^--\s*\[SC-Config\]\s+Notes:\s*(.+)/m);
+      if (n) this._lastStampNotes = n[1].trim();
+      return { name: mv[1], version: mv[2] };
+    }
+    // Fallback: Name without version (e.g. "Original DCS file")
+    const m = text.match(/^--\s*\[SC-Config\]\s+(.+)/m);
+    if (!m || m[1].startsWith('Modified:') || m[1].startsWith('Author:') || m[1].startsWith('Notes:') || m[1].startsWith('Origin:')) return null;
+    const n = text.match(/^--\s*\[SC-Config\]\s+Notes:\s*(.+)/m);
+    if (n) this._lastStampNotes = n[1].trim();
+    return { name: m[1].trim(), version: '' };
+  }
+
   _importCrewLua(text) {
     const data = parseCrewLua(text);
+
+    // Parse SC-Config stamp for version overlay
+    this.rs.loadedVariant = this._parseScConfigStamp(text);
 
     // Store original text for export
     this._originalCrewLuaText = text;

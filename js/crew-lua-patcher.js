@@ -144,7 +144,11 @@ export function patchCrewLua(originalText, members, routes, headerComment) {
   let lua = originalText;
 
   // Add header comment if provided
-  if (headerComment) {
+  if (headerComment && headerComment.startsWith('-- [SC-Config]')) {
+    // Pre-formatted stamp: strip old stamp lines, prepend new stamp
+    lua = lua.split('\n').filter(l => !l.startsWith('-- [SC-Config]')).join('\n');
+    lua = headerComment + lua;
+  } else if (headerComment) {
     lua = `-- ${headerComment}\n${lua}`;
   }
 

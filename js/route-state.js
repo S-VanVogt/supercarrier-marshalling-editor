@@ -56,6 +56,9 @@ class RouteState {
     /** Whether a crew dot is being dragged. */
     this.draggingCrew = false;
 
+    // ── Loaded variant info (from SC-Config stamp) ──────────────────────
+    this.loadedVariant = null;  // { name, version }
+
     // Snapshots for revert
     this._originalMembers = CREW_MEMBERS.map(m => ({ ...m }));
     this._originalRoutes = CREW_ROUTES.map(r => {
@@ -427,6 +430,14 @@ class RouteState {
     this._notify();
   }
 
+  /** Refresh route snapshots after import so nothing appears modified. */
+  refreshRouteSnapshots() {
+    TAKEOFF_ROUTES.length = 0;
+    this.takeoffRoutes.forEach(r => TAKEOFF_ROUTES.push({ ...r, points: r.points.map(p => ({ ...p })) }));
+    LANDING_ROUTES.length = 0;
+    this.landingRoutes.forEach(r => LANDING_ROUTES.push({ ...r, points: r.points.map(p => ({ ...p })) }));
+  }
+
   // ── Revert / diff ─────────────────────────────────────────────────────
 
   /** Reset a single takeoff route to its original data. */
@@ -591,6 +602,27 @@ class RouteState {
       if (oRoute.points.some((p, j) =>
         p.x !== cRoute.points[j].x || p.y !== cRoute.points[j].y
       )) return true;
+    }
+    return false;
+  }
+
+  isAnythingModified() {
+    for (let i = 0; i < CREW_MEMBERS.length; i++) {
+      if (this.isCrewMemberModified(i)) return true;
+    }
+    for (let i = 0; i < CREW_ROUTES.length; i++) {
+      if (this.isCrewRouteModified(i)) return true;
+    }
+    for (let i = 0; i < this.takeoffRoutes.length; i++) {
+      if (this.isRouteModified(i)) return true;
+    }
+    for (let i = 0; i < this.landingRoutes.length; i++) {
+      if (this.isLandingRouteModified(i)) return true;
+    }
+    for (let ci = 0; ci < CATAPULT_CREWS.length; ci++) {
+      for (let mi = 0; mi < CATAPULT_CREWS[ci].members.length; mi++) {
+        if (this.isCatCrewMemberModified(ci, mi)) return true;
+      }
     }
     return false;
   }

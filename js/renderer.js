@@ -1003,6 +1003,92 @@ export class Renderer {
     ctx.restore();
   }
 
+  // ── Orphaned routes (not in any takeoff or parking task) ──────────────────
+  drawOrphanedRoutePositions(rs) {
+    if (!rs) return;
+    const drawn = new Set();
+    for (const link of CREW_ACTIVE_LINKS) drawn.add(link.routeId);
+    for (const link of NON_TAKEOFF_LINKS) drawn.add(link.routeId);
+
+    const { ctx } = this;
+    ctx.save();
+    const r = 3;
+
+    for (let ri = 0; ri < CREW_ROUTES.length; ri++) {
+      if (drawn.has(ri)) continue;
+      if (rs.crewActiveVisible && !rs.crewActiveVisible[ri]) continue;
+      const route = CREW_ROUTES[ri];
+      if (!route) continue;
+
+      const pts = route.points || [route];
+      for (let j = 0; j < pts.length; j++) {
+        const c = this.wc(pts[j].x, pts[j].y);
+
+        if (j > 0) {
+          const prevC = this.wc(pts[j - 1].x, pts[j - 1].y);
+          ctx.beginPath();
+          ctx.moveTo(prevC.x, prevC.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.strokeStyle = 'rgba(160,160,160,0.35)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(180,180,180,0.5)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(140,140,140,0.5)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        const arrowLen = 8;
+        const ang = pts[j].angle ?? 0;
+        const ax = c.x + Math.cos(ang) * arrowLen;
+        const ay = c.y - Math.sin(ang) * arrowLen;
+        ctx.beginPath();
+        ctx.moveTo(c.x, c.y);
+        ctx.lineTo(ax, ay);
+        ctx.strokeStyle = 'rgba(160,160,160,0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      for (let j = 0; j < pts.length; j++) {
+        const lc = this.wc(pts[j].x, pts[j].y);
+        const lbl = pts.length > 1 ? `${ri}.${j}` : `${ri}`;
+        this._drawIndexLabel(ctx, lc.x, lc.y, r, lbl, { stroke: '#aaa' });
+      }
+
+      if (rs.crewEditMode && rs.selectedCrewType === 'active' && rs.selectedCrewIdx === ri) {
+        const selPtIdx = rs.selectedCrewPointIdx >= 0 ? rs.selectedCrewPointIdx : pts.length - 1;
+        const selPt = pts[selPtIdx];
+        if (selPt) {
+          const selC = this.wc(selPt.x, selPt.y);
+          const ringR = r + 10;
+          const a = selPt.angle ?? 0;
+          ctx.beginPath();
+          ctx.arc(selC.x, selC.y, ringR, 0, Math.PI * 2);
+          ctx.strokeStyle = '#999';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          const tickInner = ringR - 3;
+          const tickOuter = ringR + 5;
+          ctx.beginPath();
+          ctx.moveTo(selC.x + Math.cos(a) * tickInner, selC.y - Math.sin(a) * tickInner);
+          ctx.lineTo(selC.x + Math.cos(a) * tickOuter, selC.y - Math.sin(a) * tickOuter);
+          ctx.strokeStyle = '#777';
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+        }
+      }
+    }
+
+    ctx.restore();
+  }
+
   // ── Active crew connection line (progress-based) ───────────────────────────
   drawActiveCrewLines(rs) {
     if (!rs || rs.selectedRouteType !== 'takeoff') return;
@@ -1159,6 +1245,7 @@ export class Renderer {
     this.drawDeckMarkings();
     this.drawCatapults();
     this.drawJBDs();
+    this.drawOrphanedRoutePositions(routeState);
     this.drawUnusedRoutePositions(routeState);
     this.drawCrewActivePositions(routeState);
     this.drawCrew(routeState);
@@ -1167,6 +1254,26 @@ export class Renderer {
     this.drawActiveCrewLines(routeState);
     this.drawActiveParkingCrewLines(routeState);
     this.drawCatapultCrew(routeState);
+    this.drawVersionOverlay(routeState);
+  }
+
+  drawVersionOverlay(rs) {
+    if (!rs || !rs.loadedVariant) return;
+    const ctx = this.ctx;
+    const { name, version } = rs.loadedVariant;
+    ctx.save();
+    ctx.font = '12px monospace';
+    ctx.fillStyle = 'rgba(160,160,160,0.7)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const x = 28, y = 22;
+    ctx.fillText(version ? `${name}  ${version}` : name, x, y);
+    if (rs.isAnythingModified()) {
+      ctx.font = '11px monospace';
+      ctx.fillStyle = 'rgba(200,180,80,0.7)';
+      ctx.fillText('edited', x, y + 15);
+    }
+    ctx.restore();
   }
 
   // ── Catapult Crew Overlay ──────────────────────────────────────────────

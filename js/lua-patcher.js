@@ -198,7 +198,11 @@ export function patchLua(originalLua, editedRoutes) {
  */
 export function downloadPatchedLua(originalLua, editedRoutes, headerComment) {
   let patched = patchLua(originalLua, editedRoutes);
-  if (headerComment) {
+  if (headerComment && headerComment.startsWith('-- [SC-Config]')) {
+    // Pre-formatted stamp: strip old stamp lines, prepend new stamp
+    patched = patched.split('\n').filter(l => !l.startsWith('-- [SC-Config]')).join('\n');
+    patched = headerComment + patched;
+  } else if (headerComment) {
     patched = '-- ' + headerComment + '\n' + patched;
   }
   const blob = new Blob([patched], { type: 'text/plain' });

@@ -120,9 +120,31 @@
     </div>
   </details>
 
-  <!-- Import / Export -->
-  <details class="panel" id="panel-lua-io" open>
-    <summary>Import / Export</summary>
+  <!-- Config I/O (folder-based) -->
+  <details class="panel" id="panel-config-io" open>
+    <summary>Config I/O</summary>
+    <div class="panel-body">
+      <div class="btn-row" style="align-items:center">
+        <button id="btn-import-config">Import Config</button>
+        <button id="btn-export-config">Export Config</button>
+        <span class="hint" style="margin:0">Import Config expects a folder containing the SC script files (R&amp;R, crew).</span>
+      </div>
+      <div id="export-stamp-form" style="display:none;width:100%;margin-top:6px;padding:8px;background:#f5f4f0;border-radius:8px;border:0.5px solid #b4b2a9">
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;font-weight:600;white-space:nowrap">Version</label>
+          <input type="text" id="export-stamp-ver" style="width:80px;font-size:12px;padding:3px 6px;border:0.5px solid #b4b2a9;border-radius:6px;outline:none">
+          <label style="font-size:12px;font-weight:600;white-space:nowrap">Notes</label>
+          <input type="text" id="export-stamp-notes" style="flex:1;font-size:12px;padding:3px 6px;border:0.5px solid #b4b2a9;border-radius:6px;outline:none">
+          <button id="btn-export-stamp-apply">Save</button>
+          <button id="btn-export-stamp-cancel" style="background:#e8e6e0">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <!-- Import / Export (legacy, per-file) -->
+  <details class="panel" id="panel-lua-io">
+    <summary>Import / Export (per-file)</summary>
     <div class="panel-body">
       <div class="btn-row">
         <button id="btn-import-lua">Import RunwaysAndRoutes</button>
