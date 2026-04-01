@@ -14,18 +14,34 @@
       <h1>SuperCarrier Marshalling Editor</h1>
     </div>
     <canvas id="c" height="500"></canvas>
-    <div class="controls" id="progress-bar">
-      <span>Progress:</span>
-      <input type="range" min="0" max="100" value="0" id="tslider" style="flex:1;min-width:120px">
-      <span id="tval" style="min-width:32px">0.00</span>
-      <span class="coord-out" id="coordout">x: &mdash;, y: &mdash;</span>
+    <p class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</p>
+    <div class="progress-area" id="progress-bar">
+      <div class="vertex-tick-row" id="vertex-tick-row">
+        <div class="vertex-tick-spacer"></div>
+        <div class="vertex-tick-track" id="vertex-tick-track"></div>
+        <div class="vertex-tick-right-spacer"></div>
+      </div>
+      <div class="progress-row">
+        <span class="progress-label">Progress:</span>
+        <input type="range" min="0" max="100" value="0" id="tslider" style="flex:1;min-width:120px">
+        <span id="tval" style="min-width:32px">0.00</span>
+        <span class="coord-out" id="coordout">x: &mdash;, y: &mdash;</span>
+      </div>
+      <div class="task-sub-row">
+        <div class="task-brown-box" id="task-brown-box"></div>
+        <div class="task-handoff-track" id="task-handoff-track"></div>
+        <div class="task-right-group">
+          <span class="task-right-spacer"></span>
+          <span class="task-handoff-val" id="task-handoff-val"></span>
+          <button class="route-edit-btn" id="btn-edit-task">Edit Task</button>
+        </div>
+      </div>
     </div>
     <div class="controls" id="crew-edit-bar" style="display:none">
       <span id="crew-edit-label" class="crew-edit-label">No crew selected</span>
       <div id="crew-edit-fields" class="crew-edit-fields"></div>
       <span class="coord-out" id="coordout-crew">x: &mdash;, y: &mdash;</span>
     </div>
-    <p class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</p>
   </div>
 
   <!-- Scrollable panels -->

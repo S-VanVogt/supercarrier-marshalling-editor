@@ -106,7 +106,7 @@ function buildPointsInner(route) {
     if (j < route.points.length - 1) line += ',';
     lines.push(line);
   }
-  return ' -- ' + route.label + '\n' + lines.join('\n') + '\n\t\t';
+  return ' -- Route ' + route.id + ': ' + route.label + '\n' + lines.join('\n') + '\n\t\t';
 }
 
 function formatNum(n) {

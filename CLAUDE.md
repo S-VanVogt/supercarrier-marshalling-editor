@@ -153,3 +153,4 @@ grid → polygon → deckMarkings → catapults → JBDs → unusedRoutePosition
 - `polyline-app-backup-v11` — (created in earlier session)
 - `polyline-app-backup-v12` — After F-14 silhouette overlay on route progress marker, 180° rotation on landing at t=1.0
 - `polyline-app-backup-v13` — After deck markings (LA, centerline, foul lines, 4 elevators), catapult crew editing, polygon vertex fix
+- `polyline-app-backup-v14` — After cat 1-2-3-4 selector on takeoff routes, route panel column width rebalance (3fr/3fr/2fr)

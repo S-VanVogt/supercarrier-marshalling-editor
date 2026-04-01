@@ -1090,6 +1090,26 @@ export class Renderer {
   }
 
   // ── Active crew connection line (progress-based) ───────────────────────────
+
+  /** Resolve a crew route/member to a world-space {x, y} target. */
+  _crewTarget(routeId) {
+    const crewRoute = CREW_ROUTES[routeId];
+    if (!crewRoute) return null;
+    const pos = crewRoute.points
+      ? crewRoute.points[crewRoute.points.length - 1]
+      : crewRoute;
+    return { x: pos.x, y: pos.y };
+  }
+
+  /** Find the controlling step index at progress t (-1 = brown, null = catapult). */
+  _controllingStep(task, t) {
+    if (t === 0) return -1; // brown
+    for (let i = 0; i < task.steps.length; i++) {
+      if (t < task.steps[i].progress) return i;
+    }
+    return null; // past last step → catapult
+  }
+
   drawActiveCrewLines(rs) {
     if (!rs || rs.selectedRouteType !== 'takeoff') return;
     const ri = rs.selectedRoute;
@@ -1100,64 +1120,73 @@ export class Renderer {
     if (!route || route.points.length < 2) return;
 
     const t = rs.t;
-    const markerPt = polylinePoint(route.points, t);
-    if (!markerPt) return;
-
-    const markerC = this.wc(markerPt.x, markerPt.y);
     const { ctx } = this;
     ctx.save();
 
-    // Determine the ONE controlling entity at current progress.
-    // Progress values are HANDOFF points: step[i].progress is when
-    // step[i]'s yellow takes over from step[i-1]'s yellow (or brown).
-    let target = null;  // { x, y } in world coords
+    const controllingIdx = this._controllingStep(task, t);
+    const taskEdit = !!rs.taskEditActive;
 
-    if (t === 0) {
-      // Exactly at start: brown is controlling
-      const brownRoute = CREW_ROUTES[task.brownRouteId];
-      if (brownRoute) {
-        const pos = brownRoute.points
-          ? brownRoute.points[brownRoute.points.length - 1]
-          : brownRoute;
-        target = { x: pos.x, y: pos.y };
-      }
-    } else {
-      // Find which yellow is controlling: the step whose handoff we haven't reached yet
-      // step[0] controls from 0 to step[0].progress
-      // step[1] controls from step[0].progress to step[1].progress
-      // etc.
-      let controllingStep = -1;
+    // In task edit mode, draw all static handoff lines in gray
+    // Each line starts from where the step RECEIVES control (initial handoff)
+    if (taskEdit) {
       for (let i = 0; i < task.steps.length; i++) {
-        if (t < task.steps[i].progress) {
-          controllingStep = i;
-          break;
-        }
+        if (i === controllingIdx) continue; // drawn as orange below
+        const step = task.steps[i];
+        const target = this._crewTarget(step.routeId);
+        if (!target) continue;
+        // Initial position: where this step receives control
+        const initT = (i === 0) ? 0 : task.steps[i - 1].progress;
+        const handoffPt = polylinePoint(route.points, initT);
+        if (!handoffPt) continue;
+        const hc = this.wc(handoffPt.x, handoffPt.y);
+        const tc = this.wc(target.x, target.y);
+        ctx.strokeStyle = 'rgba(130,130,130,0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(hc.x, hc.y);
+        ctx.lineTo(tc.x, tc.y);
+        ctx.stroke();
       }
-
-      if (controllingStep >= 0) {
-        // A yellow-shirt is controlling
-        const step = task.steps[controllingStep];
-        const crewRoute = CREW_ROUTES[step.routeId];
-        if (crewRoute) {
-          const pos = crewRoute.points
-            ? crewRoute.points[crewRoute.points.length - 1]
-            : crewRoute;
-          target = { x: pos.x, y: pos.y };
-        }
-      } else {
-        // Past last step's progress: catapult has control
-        const cat = Renderer.CATAPULTS[route.runwayIdx - 1];
-        if (cat) {
-          target = { x: cat.cx, y: cat.cy };
+      // Brown line (from route start to brown crew position)
+      if (controllingIdx !== -1 && task.brownRouteId != null) {
+        const target = this._crewTarget(task.brownRouteId);
+        if (target) {
+          const startPt = polylinePoint(route.points, 0);
+          if (startPt) {
+            const sc = this.wc(startPt.x, startPt.y);
+            const tc = this.wc(target.x, target.y);
+            ctx.strokeStyle = 'rgba(130,130,130,0.35)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(sc.x, sc.y);
+            ctx.lineTo(tc.x, tc.y);
+            ctx.stroke();
+          }
         }
       }
     }
 
-    // Draw solid gray line from progress marker to controlling position
+    // Draw the controlling line (orange in task edit, gray otherwise)
+    const markerPt = polylinePoint(route.points, t);
+    if (!markerPt) { ctx.restore(); return; }
+    const markerC = this.wc(markerPt.x, markerPt.y);
+
+    let target = null;
+    if (controllingIdx === -1) {
+      // Brown is controlling
+      target = this._crewTarget(task.brownRouteId);
+    } else if (controllingIdx !== null) {
+      target = this._crewTarget(task.steps[controllingIdx].routeId);
+    } else {
+      // Past last step → catapult
+      const cat = Renderer.CATAPULTS[route.runwayIdx - 1];
+      if (cat) target = { x: cat.cx, y: cat.cy };
+    }
+
     if (target) {
       const tc = this.wc(target.x, target.y);
-      ctx.strokeStyle = 'rgba(130,130,130,0.6)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = taskEdit ? 'rgba(224,128,48,0.8)' : 'rgba(130,130,130,0.6)';
+      ctx.lineWidth = taskEdit ? 2 : 1.5;
       ctx.beginPath();
       ctx.moveTo(markerC.x, markerC.y);
       ctx.lineTo(tc.x, tc.y);
@@ -1168,6 +1197,27 @@ export class Renderer {
   }
 
   // ── Active parking crew connection line (progress-based) ──────────────────
+
+  /** Resolve a parking step's target position (handles routeId -1 → idle). */
+  _parkingTarget(step) {
+    if (step.routeId >= 0) {
+      return this._crewTarget(step.routeId);
+    }
+    // routeId -1: member at idle position
+    const member = CREW_MEMBERS[step.memberId];
+    return member ? { x: member.x, y: member.y } : null;
+  }
+
+  /** Find controlling step index for parking task at progress t.
+   *  Returns step index (0-based), or -1 if past all steps (last step still controls). */
+  _parkingControllingStep(task, t) {
+    for (let i = 0; i < task.steps.length; i++) {
+      if (t < task.steps[i].progress) return i;
+    }
+    // Past last step → last step still controls
+    return task.steps.length > 0 ? task.steps.length - 1 : null;
+  }
+
   drawActiveParkingCrewLines(rs) {
     if (!rs || rs.selectedRouteType !== 'landing') return;
     const ri = rs.selectedRoute;
@@ -1178,56 +1228,49 @@ export class Renderer {
     if (!route || route.points.length < 2) return;
 
     const t = rs.t;
-    const markerPt = polylinePoint(route.points, t);
-    if (!markerPt) return;
-
-    const markerC = this.wc(markerPt.x, markerPt.y);
     const { ctx } = this;
     ctx.save();
 
-    // Determine the ONE controlling crew at current progress.
-    // First step controls from t=0. step[i].progress is the handoff point
-    // where step[i+1] takes over. Last step (typically the brown) controls
-    // until the end (progress ~1.0).
+    const controllingIdx = this._parkingControllingStep(task, t);
+    const taskEdit = !!rs.taskEditActive;
+
+    // In task edit mode, draw all static handoff lines in gray
+    // Each line starts from where the step RECEIVES control (initial handoff)
+    if (taskEdit) {
+      for (let i = 0; i < task.steps.length; i++) {
+        if (i === controllingIdx) continue; // drawn as orange below
+        const step = task.steps[i];
+        const target = this._parkingTarget(step);
+        if (!target) continue;
+        // Initial position: where this step receives control
+        const initT = (i === 0) ? 0 : task.steps[i - 1].progress;
+        const handoffPt = polylinePoint(route.points, initT);
+        if (!handoffPt) continue;
+        const hc = this.wc(handoffPt.x, handoffPt.y);
+        const tc = this.wc(target.x, target.y);
+        ctx.strokeStyle = 'rgba(130,130,130,0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(hc.x, hc.y);
+        ctx.lineTo(tc.x, tc.y);
+        ctx.stroke();
+      }
+    }
+
+    // Draw the controlling line (orange in task edit, gray otherwise)
+    const markerPt = polylinePoint(route.points, t);
+    if (!markerPt) { ctx.restore(); return; }
+    const markerC = this.wc(markerPt.x, markerPt.y);
+
     let target = null;
-
-    let controllingStep = -1;
-    for (let i = 0; i < task.steps.length; i++) {
-      if (t < task.steps[i].progress) {
-        controllingStep = i;
-        break;
-      }
-    }
-
-    // If past last step's progress, the last member (brown) still controls
-    if (controllingStep < 0 && task.steps.length > 0) {
-      controllingStep = task.steps.length - 1;
-    }
-
-    if (controllingStep >= 0) {
-      const step = task.steps[controllingStep];
-      if (step.routeId >= 0) {
-        // Member at route position
-        const crewRoute = CREW_ROUTES[step.routeId];
-        if (crewRoute) {
-          const pos = crewRoute.points
-            ? crewRoute.points[crewRoute.points.length - 1]
-            : crewRoute;
-          target = { x: pos.x, y: pos.y };
-        }
-      } else {
-        // routeId -1: member at idle position
-        const member = CREW_MEMBERS[step.memberId];
-        if (member) {
-          target = { x: member.x, y: member.y };
-        }
-      }
+    if (controllingIdx !== null && controllingIdx >= 0) {
+      target = this._parkingTarget(task.steps[controllingIdx]);
     }
 
     if (target) {
       const tc = this.wc(target.x, target.y);
-      ctx.strokeStyle = 'rgba(130,130,130,0.6)';
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = taskEdit ? 'rgba(224,128,48,0.8)' : 'rgba(130,130,130,0.6)';
+      ctx.lineWidth = taskEdit ? 2 : 1.5;
       ctx.beginPath();
       ctx.moveTo(markerC.x, markerC.y);
       ctx.lineTo(tc.x, tc.y);

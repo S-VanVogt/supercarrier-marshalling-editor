@@ -12,6 +12,30 @@ export const CATAPULT_COLORS = {
   4: '#9040C0',  // Cat 4 — purple
 };
 
+/** Standard last-3-point approach templates per catapult. */
+export const CAT_TAIL_POINTS = {
+  1: [
+    { x: 34.8, y: 16.2, v: 2.0 },
+    { x: 49.2, y: 19.0, v: 2.0 },
+    { x: 55.0, y: 18.54, v: 1.0 },
+  ],
+  2: [
+    { x: 25.0, y: -2.9, v: 2.0 },
+    { x: 39.5, y: -3.20, v: 1.0 },
+    { x: 55.9, y: -3.68, v: 1.0 },
+  ],
+  3: [
+    { x: -65.0, y: -17.3, v: 2.0 },
+    { x: -55.0, y: -18.8, v: 1.0 },
+    { x: -39.4, y: -19.92, v: 1.0 },
+  ],
+  4: [
+    { x: -79.0, y: -32.8, v: 2.0 },
+    { x: -70.0, y: -33.3, v: 1.0 },
+    { x: -58.5, y: -32.8, v: 1.0 },
+  ],
+};
+
 export const TAKEOFF_ROUTES = [
   { id: 1, runwayIdx: 2, label: '6pack 1 → Cat 2', terminalSize: 12.0, points: [
     { x: 24.5, y: 9.5, v: 1.0 },

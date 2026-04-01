@@ -2,8 +2,8 @@
  * UI controller — binds DOM elements to application state, manages the
  * point list, slider, import/export, route panels, and canvas interactions.
  */
-import { polylinePoint } from './polyline.js';
-import { CATAPULT_COLORS, LANDING_COLOR } from './route-data.js';
+import { polylinePoint, segmentLengths } from './polyline.js';
+import { CATAPULT_COLORS, CAT_TAIL_POINTS, LANDING_COLOR } from './route-data.js';
 import { CREW_MEMBERS, LIVERY_COLOURS } from './crew-data.js';
 import { downloadPatchedLua, parseTakeoffRoutes } from './lua-patcher.js';
 import { parseCrewLua } from './crew-lua-parser.js';
@@ -36,6 +36,11 @@ export class UI {
     this.ptRows      = document.getElementById('pt-rows');
     this.addXInput   = document.getElementById('add-x');
     this.addYInput   = document.getElementById('add-y');
+
+    // Task edit state
+    this._taskEditActive = false;
+    this._selectedHandoff = -1;  // step index, -1 = none
+    this._draggingHandoff = false;
 
     this._bindEvents();
     this._buildRoutePanels();
@@ -75,6 +80,31 @@ export class UI {
 
     // Buttons
     document.getElementById('btn-add').addEventListener('click', () => this._addFromInputs());
+
+    // Edit Task toggle
+    document.getElementById('btn-edit-task').addEventListener('click', () => {
+      this._taskEditActive = !this._taskEditActive;
+      this._selectedHandoff = -1;
+      this._syncTaskRow();
+    });
+
+    // Handoff box dragging (document-level)
+    document.addEventListener('mousemove', (e) => {
+      if (!this._draggingHandoff || !this._dragTrack) return;
+      const rect = this._dragTrack.getBoundingClientRect();
+      let progress = (e.clientX - rect.left) / rect.width;
+      progress = Math.max(0, Math.min(1, progress));
+      const task = this._currentTask();
+      if (task && task.steps[this._dragStepIdx]) {
+        task.steps[this._dragStepIdx].progress = Math.round(progress * 1000) / 1000;
+        this._syncTaskRow();
+        this._update();
+      }
+    });
+    document.addEventListener('mouseup', () => {
+      this._draggingHandoff = false;
+      this._dragTrack = null;
+    });
 
     // Enter key in add-point inputs
     const addEnter = e => { if (e.key === 'Enter') this._addFromInputs(); };
@@ -418,7 +448,11 @@ export class UI {
       row.innerHTML = `
         <span class="route-color-dot" style="background:${color}"></span>
         <input type="checkbox" checked data-ri="${i}">
-        <input class="route-label-input" type="text" value="${route.id}. ${route.label}" data-ri="${i}">
+        <span class="route-id">${route.id}.</span>
+        <input class="route-label-input" type="text" value="${route.label}" data-ri="${i}">
+        <span class="cat-selector" data-ri="${i}">${[1,2,3,4].map(c =>
+          `<button class="cat-sel-btn${c === route.runwayIdx ? ' active' : ''}" data-cat="${c}" style="--cat-color:${CATAPULT_COLORS[c]}">${c}</button>`
+        ).join('')}</span>
         <button class="route-edit-btn" data-ri="${i}" title="Edit route on canvas">Edit</button>
         <button class="route-revert-btn" data-ri="${i}" title="Revert to original" disabled>Revert</button>
       `;
@@ -435,9 +469,16 @@ export class UI {
         if (this.rs.selectedRouteType === 'takeoff' && this.rs.selectedRoute === i) {
           this.rs.deselectRoute();
         } else {
+          if (!this.rs.takeoffRouteVisible[i]) this.rs.toggleTakeoffRoute(i);
           this.rs.selectRoute('takeoff', i);
         }
         this.renderList();
+      });
+      row.querySelector('.cat-selector').addEventListener('click', (e) => {
+        const btn = e.target.closest('.cat-sel-btn');
+        if (!btn) return;
+        const newCat = parseInt(btn.dataset.cat);
+        this._switchRouteCatapult(i, newCat);
       });
       list.appendChild(row);
     }
@@ -453,7 +494,8 @@ export class UI {
       row.innerHTML = `
         <span class="route-color-dot" style="background:${color}"></span>
         <input type="checkbox" ${this.rs.landingRouteVisible[i] ? 'checked' : ''} data-li="${i}">
-        <input class="route-label-input" type="text" value="${route.id}. ${route.label}" data-li="${i}">
+        <span class="route-id">${route.id}.</span>
+        <input class="route-label-input" type="text" value="${route.label}" data-li="${i}">
         <button class="route-edit-btn" data-li="${i}" title="Edit route on canvas">Edit</button>
         <button class="route-revert-btn" data-li="${i}" title="Revert to original" disabled>Revert</button>
       `;
@@ -476,6 +518,7 @@ export class UI {
         } else {
           // Auto-enable landing visibility when editing a landing route
           if (!this.rs.landingVisible) this.rs.toggleLandingGlobal();
+          if (!this.rs.landingRouteVisible[i]) this.rs.toggleLandingRoute(i);
           this.rs.selectRoute('landing', i);
         }
         this.renderList();
@@ -552,6 +595,21 @@ export class UI {
     console.log(`Imported crew.lua: ${data.members.length} members, ${data.routes.length} routes, ${data.takeoffTasks.length} takeoff tasks, ${data.parkingTasks.length} parking tasks`);
   }
 
+  _switchRouteCatapult(routeIdx, newCat) {
+    const route = this.rs.takeoffRoutes[routeIdx];
+    if (route.runwayIdx === newCat) return;
+    const tail = CAT_TAIL_POINTS[newCat];
+    const pts = route.points;
+    // Replace last 3 points with the new catapult's approach
+    const keep = pts.slice(0, pts.length - 3);
+    route.points = [...keep, ...tail.map(p => ({ ...p }))];
+    route.runwayIdx = newCat;
+    // Update label suffix
+    route.label = route.label.replace(/Cat \d/, `Cat ${newCat}`);
+    this._rebuildRouteList();
+    this.rs._notify();
+  }
+
   _rebuildRouteList() {
     const list = document.getElementById('takeoff-route-list');
     list.innerHTML = '';
@@ -618,6 +676,204 @@ export class UI {
 
     // Crew toolbar fields
     this._syncCrewToolbarFields();
+
+    // Task row
+    this._syncTaskRow();
+  }
+
+  // ── Task editing ──────────────────────────────────────────────────────
+
+  /** Get the current task for the selected route, or null. */
+  _currentTask() {
+    const rs = this.rs;
+    if (rs.selectedRouteType === 'takeoff' && rs.selectedRoute >= 0) {
+      return TAKEOFF_TASKS[rs.selectedRoute] || null;
+    }
+    if (rs.selectedRouteType === 'landing' && rs.selectedRoute >= 0) {
+      return PARKING_TASKS[rs.selectedRoute] || null;
+    }
+    return null;
+  }
+
+  _syncVertexTicks() {
+    const vtTrack = document.getElementById('vertex-tick-track');
+    vtTrack.innerHTML = '';
+    const rs = this.rs;
+    let points = null;
+    if (rs.selectedRouteType === 'takeoff' && rs.selectedRoute >= 0) {
+      points = rs.takeoffRoutes[rs.selectedRoute]?.points;
+    } else if (rs.selectedRouteType === 'landing' && rs.selectedRoute >= 0) {
+      points = rs.landingRoutes[rs.selectedRoute]?.points;
+    }
+    if (!points || points.length < 2) return;
+
+    const { segs, total } = segmentLengths(points);
+    let cumulative = 0;
+    for (let i = 0; i < points.length; i++) {
+      const t = total > 0 ? cumulative / total : 0;
+      const tick = document.createElement('div');
+      tick.className = 'vertex-tick';
+      tick.style.left = (t * 100) + '%';
+      tick.innerHTML = `<span class="vertex-tick-label">${i}</span><div class="vertex-tick-line"></div>`;
+      vtTrack.appendChild(tick);
+      if (i < segs.length) cumulative += segs[i];
+    }
+  }
+
+  _syncTaskRow() {
+    // Vertex ticks — show whenever a route is selected
+    this._syncVertexTicks();
+
+    const btn = document.getElementById('btn-edit-task');
+    const brownBox = document.getElementById('task-brown-box');
+    const track = document.getElementById('task-handoff-track');
+    const valSpan = document.getElementById('task-handoff-val');
+
+    const task = this._currentTask();
+    const isTakeoff = this.rs.selectedRouteType === 'takeoff';
+
+    // Toggle button active state
+    btn.classList.toggle('active', this._taskEditActive);
+    this.rs.taskEditActive = this._taskEditActive;
+
+    // Show/hide task content (not the button) — use visibility to preserve layout
+    const showContent = this._taskEditActive && task;
+    brownBox.style.visibility = showContent ? '' : 'hidden';
+    track.style.visibility = showContent ? '' : 'hidden';
+    valSpan.style.visibility = showContent ? '' : 'hidden';
+
+    if (!showContent) {
+      this._selectedHandoff = -1;
+      brownBox.innerHTML = '';
+      track.innerHTML = '';
+      valSpan.innerHTML = '';
+      return;
+    }
+
+    // Brown box — placed at position 0 inside the track for takeoff
+    brownBox.innerHTML = '';
+
+    // Handoff boxes on the track
+    track.innerHTML = '';
+    const steps = task.steps || [];
+
+    // Compute positions, nudge overlapping boxes
+    const boxW = 20;
+    const positions = steps.map(s => s.progress);
+    // Add brown at position 0 for takeoff nudge calculation
+    const hasBrown = isTakeoff && task.brownId != null;
+    if (hasBrown) positions.unshift(0);
+    const nudged = this._nudgePositions(positions, boxW, track);
+
+    // Place brown box at position 0 inside track
+    if (hasBrown) {
+      const brownCrewBox = this._makeCrewBox(task.brownRouteId, task.brownId, 'brown', true);
+      brownCrewBox.style.position = 'absolute';
+      brownCrewBox.style.left = `calc(${nudged[0] * 100}% - ${boxW / 2}px)`;
+      brownCrewBox.classList.remove('static-brown');
+      brownCrewBox.style.cursor = 'default';
+      track.appendChild(brownCrewBox);
+      // Remove the brown entry from nudged so step indices stay aligned
+      nudged.shift();
+    }
+
+    for (let si = 0; si < steps.length; si++) {
+      const step = steps[si];
+      const memberColor = this._memberColor(step.memberId);
+      const box = this._makeCrewBox(step.routeId, step.memberId, memberColor, false);
+      box.style.left = `calc(${nudged[si] * 100}% - ${boxW / 2}px)`;
+      box.dataset.stepIdx = si;
+      if (si === this._selectedHandoff) box.classList.add('selected');
+
+      // Click to select
+      box.addEventListener('mousedown', (e) => {
+        this._selectedHandoff = si;
+        this._draggingHandoff = true;
+        this._dragTrack = track;
+        this._dragStepIdx = si;
+        e.preventDefault();
+        this._syncTaskRow();
+      });
+
+      track.appendChild(box);
+    }
+
+    // Handoff value display
+    valSpan.innerHTML = '';
+    if (this._selectedHandoff >= 0 && this._selectedHandoff < steps.length) {
+      const step = steps[this._selectedHandoff];
+      const increment = 0.005;
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = step.progress.toFixed(3);
+      input.addEventListener('change', () => {
+        const v = parseFloat(input.value);
+        if (!isNaN(v) && v >= 0 && v <= 1) {
+          step.progress = v;
+          this._syncTaskRow();
+          this._update();
+        }
+      });
+
+      const upBtn = document.createElement('button');
+      upBtn.className = 'task-spinner-btn';
+      upBtn.textContent = '\u25B2';
+      upBtn.addEventListener('click', () => {
+        step.progress = Math.min(1, Math.round((step.progress + increment) * 1000) / 1000);
+        this._syncTaskRow();
+        this._update();
+      });
+
+      const downBtn = document.createElement('button');
+      downBtn.className = 'task-spinner-btn';
+      downBtn.textContent = '\u25BC';
+      downBtn.addEventListener('click', () => {
+        step.progress = Math.max(0, Math.round((step.progress - increment) * 1000) / 1000);
+        this._syncTaskRow();
+        this._update();
+      });
+
+      const spinnerDiv = document.createElement('span');
+      spinnerDiv.className = 'task-spinner';
+      spinnerDiv.appendChild(upBtn);
+      spinnerDiv.appendChild(downBtn);
+
+      valSpan.appendChild(input);
+      valSpan.appendChild(spinnerDiv);
+    }
+  }
+
+  _makeCrewBox(routeId, memberId, memberColor, isStatic) {
+    const box = document.createElement('div');
+    box.className = 'task-crew-box' + (isStatic ? ' static-brown' : '');
+    const routeLabel = routeId >= 0 ? routeId : '--';
+    box.innerHTML = `<div class="crew-route-half">${routeLabel}</div><div class="crew-member-half ${memberColor}">${memberId}</div>`;
+    return box;
+  }
+
+  _memberColor(memberId) {
+    const m = CREW_MEMBERS[memberId];
+    if (!m) return 'yellow';
+    return m.livery === 'brown' ? 'brown' : 'yellow';
+  }
+
+  /** Nudge overlapping positions so boxes don't stack. Returns adjusted 0-1 values for display. */
+  _nudgePositions(positions, boxW, track) {
+    // Use fractional width - estimate track width
+    const trackW = track.offsetWidth || 400;
+    const minGap = (boxW + 2) / trackW;  // min separation in 0-1 space
+    const nudged = positions.slice();
+    // Sort indices by position
+    const indices = nudged.map((_, i) => i).sort((a, b) => nudged[a] - nudged[b]);
+    for (let k = 1; k < indices.length; k++) {
+      const prev = indices[k - 1];
+      const curr = indices[k];
+      if (nudged[curr] - nudged[prev] < minGap) {
+        nudged[curr] = nudged[prev] + minGap;
+      }
+    }
+    return nudged;
   }
 
   _syncCrewToolbarFields() {
