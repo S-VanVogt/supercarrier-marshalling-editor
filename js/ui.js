@@ -5,7 +5,7 @@
 import { polylinePoint, segmentLengths } from './polyline.js';
 import { CATAPULT_COLORS, CAT_TAIL_POINTS, LANDING_COLOR } from './route-data.js';
 import { CREW_MEMBERS, LIVERY_COLOURS } from './crew-data.js';
-import { downloadPatchedLua, parseTakeoffRoutes } from './lua-patcher.js';
+import { downloadPatchedLua, parseTakeoffRoutes, parseLandingRoutes, parseElevators, patchElevators, parseBlockerTerminals, patchBlockerTerminals } from './lua-patcher.js';
 import { parseCrewLua } from './crew-lua-parser.js';
 import { replaceCrewMembers } from './crew-data.js';
 import { CREW_ROUTES, replaceCrewRoutes } from './crew-routes-data.js';
@@ -49,6 +49,7 @@ export class UI {
 
     this._bindEvents();
     this._buildRoutePanels();
+    this._buildBlockerGrid();
     this._syncRoutePanel();
     this.renderList();
   }
@@ -104,6 +105,12 @@ export class UI {
         this._syncTaskRow();
       }
     });
+    // Click progress area background to deselect crew in combined mode
+    document.getElementById('progress-bar').addEventListener('mousedown', (e) => {
+      if (e.target === e.currentTarget && this.rs.crewEditMode && this.rs.selectedRoute >= 0) {
+        this.rs.exitCrewEdit();
+      }
+    });
 
     // Handoff box dragging (document-level)
     document.addEventListener('mousemove', (e) => {
@@ -140,6 +147,12 @@ export class UI {
           try {
             const routes = parseTakeoffRoutes(text);
             this.rs.loadTakeoffRoutes(routes);
+            const landingRoutes = parseLandingRoutes(text);
+            if (landingRoutes) this.rs.loadLandingRoutes(landingRoutes);
+            const elevators = parseElevators(text);
+            if (elevators) this._loadElevators(elevators);
+            const blockers = parseBlockerTerminals(text);
+            if (blockers) this._loadBlockerTerminals(blockers);
             this._originalLuaText = text;
             // Parse SC-Config stamp for version overlay
             const stamp = this._parseScConfigStamp(text);
@@ -176,7 +189,7 @@ export class UI {
     document.getElementById('btn-export-lua').addEventListener('click', () => {
       if (!this._originalLuaText) { alert('Lua file not loaded yet.'); return; }
       const headerComment = document.getElementById('lua-header-comment').value.trim();
-      downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, headerComment);
+      downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, headerComment, this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
     });
 
     // Export Crew
@@ -203,6 +216,14 @@ export class UI {
         if (rrFile) promises.push(rrFile.text().then(text => {
           const routes = parseTakeoffRoutes(text);
           this.rs.loadTakeoffRoutes(routes);
+          // Parse landing routes
+          const landingRoutes = parseLandingRoutes(text);
+          if (landingRoutes) this.rs.loadLandingRoutes(landingRoutes);
+          // Parse elevators
+          const elevators = parseElevators(text);
+          if (elevators) this._loadElevators(elevators);
+          const blockers = parseBlockerTerminals(text);
+          if (blockers) this._loadBlockerTerminals(blockers);
           this._originalLuaText = text;
           this._rebuildRouteList();
           const stamp = this._parseScConfigStamp(text);
@@ -251,7 +272,7 @@ export class UI {
       stamp += `-- [SC-Config] Modified: ${date}\n`;
       if (notes) stamp += `-- [SC-Config] Notes: ${notes}\n`;
       if (this._originalLuaText) {
-        downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp);
+        downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp, this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
       }
       if (this._originalCrewLuaText) {
         downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp);
@@ -279,27 +300,50 @@ export class UI {
       });
     }
 
-    // Route global toggles
-    document.getElementById('takeoff-global').addEventListener('change', e => {
-      this.rs.setAllTakeoffRoutes(e.target.checked);
+    // Route global toggles (momentary: show all / show none)
+    document.getElementById('takeoff-global').addEventListener('click', () => {
+      const allVisible = this.rs.allTakeoffRoutesVisible();
+      this.rs.setAllTakeoffRoutes(!allVisible);
     });
-    document.getElementById('landing-global').addEventListener('change', e => {
-      if (e.target.checked) {
-        if (!this.rs.landingVisible) this.rs.toggleLandingGlobal();
-        this.rs.setAllLandingRoutes(true);
-      } else {
+    document.getElementById('landing-global').addEventListener('click', () => {
+      const allVisible = this.rs.landingVisible && this.rs.allLandingRoutesVisible();
+      if (allVisible) {
         this.rs.setAllLandingRoutes(false);
         if (this.rs.landingVisible) this.rs.toggleLandingGlobal();
+      } else {
+        if (!this.rs.landingVisible) this.rs.toggleLandingGlobal();
+        this.rs.setAllLandingRoutes(true);
       }
     });
+    // Parked toggles (persistent on/off)
+    document.getElementById('takeoff-parked').addEventListener('click', () => {
+      this.rs.showParkedTakeoff = !this.rs.showParkedTakeoff;
+      document.getElementById('takeoff-parked').classList.toggle('active', this.rs.showParkedTakeoff);
+      this.rs._notify();
+    });
+    document.getElementById('landing-parked').addEventListener('click', () => {
+      this.rs.showParkedLanding = !this.rs.showParkedLanding;
+      document.getElementById('landing-parked').classList.toggle('active', this.rs.showParkedLanding);
+      this.rs._notify();
+    });
+
+    // ── Elevator type selects ───────────────────────────────────────────
+    document.querySelectorAll('.elevator-type').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const idx = parseInt(sel.dataset.el);
+        this.rs.elevatorTypes[idx] = parseInt(sel.value);
+        this.rs._notify();
+      });
+    });
+
     document.getElementById('crew-idle-global').addEventListener('change', e => {
       this.rs.setAllCrew(e.target.checked);
     });
     document.getElementById('crew-active-global').addEventListener('change', e => {
       this.rs.setAllCrewActive(e.target.checked);
     });
-    document.getElementById('crew-active-filter').addEventListener('click', () => {
-      this._filterActiveBySelectedIdle();
+    document.getElementById('crew-related-filter').addEventListener('click', () => {
+      this._filterRelatedBySelectedIdle();
     });
 
     // ── Catapult crew panel ──────────────────────────────────────────────
@@ -333,6 +377,26 @@ export class UI {
 
     // Resize
     window.addEventListener('resize', () => this._resize());
+
+    // Canvas height drag handle
+    const resizeHandle = document.getElementById('canvas-resize-handle');
+    let resizeDragY = 0, resizeStartH = 0;
+    resizeHandle.addEventListener('mousedown', (e) => {
+      resizeDragY = e.clientY;
+      resizeStartH = this.canvas.getBoundingClientRect().height;
+      const onMove = (ev) => {
+        const newH = Math.max(200, Math.round(resizeStartH + (ev.clientY - resizeDragY)));
+        this._canvasHeight = newH;
+        this._resize();
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      e.preventDefault();
+    });
 
     // State changes → re-render
     this.rs.onChange(() => {
@@ -406,19 +470,33 @@ export class UI {
     this._memberToRoutes = memberToRoutes;
   }
 
-  _filterActiveBySelectedIdle() {
+  _filterRelatedBySelectedIdle() {
     const rs = this.rs;
-    // Only works when an idle member is selected
     if (!rs.crewEditMode || rs.selectedCrewType !== 'idle' || rs.selectedCrewIdx < 0) return;
     const memberId = rs.selectedCrewIdx;
-    const relatedRoutes = this._memberToRoutes.get(memberId);
-    if (!relatedRoutes || relatedRoutes.size === 0) return;
 
-    // Turn off all active routes, then turn on only the related ones
+    // Active routes used by this member
+    const relatedRoutes = this._memberToRoutes.get(memberId);
     for (let i = 0; i < rs.crewActiveVisible.length; i++) {
-      rs.crewActiveVisible[i] = relatedRoutes.has(i);
+      rs.crewActiveVisible[i] = relatedRoutes ? relatedRoutes.has(i) : false;
     }
+
+    // Takeoff/landing tasks that reference this member
+    const refs = this._memberRefs.get(memberId);
+    const relatedTakeoff = refs ? refs.takeoff : new Set(); // 1-based task numbers
+    const relatedLanding = refs ? refs.landing : new Set();
+
+    for (let i = 0; i < rs.takeoffRouteVisible.length; i++) {
+      rs.takeoffRouteVisible[i] = relatedTakeoff.has(i + 1);
+    }
+    for (let i = 0; i < rs.landingRouteVisible.length; i++) {
+      rs.landingRouteVisible[i] = relatedLanding.has(i + 1);
+    }
+    // Ensure global landing toggle is on if any landing routes are related
+    if (relatedLanding.size > 0) rs.landingVisible = true;
+
     rs._notify();
+    this._syncRoutePanel();
     this.renderList();
   }
 
@@ -683,7 +761,8 @@ export class UI {
       const revertBtn = rows[i].querySelector('.route-revert-btn');
       revertBtn.disabled = !this.rs.isRouteModified(i);
     }
-    document.getElementById('takeoff-global').checked = this.rs.allTakeoffRoutesVisible();
+    const allTakeoff = this.rs.allTakeoffRoutesVisible();
+    document.getElementById('takeoff-global').textContent = allTakeoff ? 'Show none' : 'Show all';
 
     // Landing panel
     const lRows = document.querySelectorAll('#landing-route-list .route-row');
@@ -697,7 +776,8 @@ export class UI {
       const revertBtn = lRows[i].querySelector('.route-revert-btn');
       revertBtn.disabled = !this.rs.isLandingRouteModified(i);
     }
-    document.getElementById('landing-global').checked = this.rs.landingVisible && this.rs.allLandingRoutesVisible();
+    const allLanding = this.rs.landingVisible && this.rs.allLandingRoutesVisible();
+    document.getElementById('landing-global').textContent = allLanding ? 'Show none' : 'Show all';
 
     // Crew idle sync
     const idleRows = document.querySelectorAll('#crew-idle-list .route-row');
@@ -713,7 +793,7 @@ export class UI {
     document.getElementById('crew-active-global').checked = this.rs.allCrewActiveVisible();
 
     // Enable "Related" filter button only when an idle member is selected
-    const filterBtn = document.getElementById('crew-active-filter');
+    const filterBtn = document.getElementById('crew-related-filter');
     const hasIdleSelected = this.rs.crewEditMode && this.rs.selectedCrewType === 'idle' && this.rs.selectedCrewIdx >= 0;
     filterBtn.disabled = !hasIdleSelected;
 
@@ -1078,8 +1158,10 @@ export class UI {
     if (!label || !fieldsDiv || !progressBar || !crewBar) return;
 
     const rs = this.rs;
+    const hasRoute = rs.selectedRoute >= 0 && rs.selectedRouteType;
     const showCrewBar = !!rs.crewEditMode;
-    progressBar.style.display = showCrewBar ? 'none' : '';
+    // Show progress bar when a route is selected (even if crew edit also active)
+    progressBar.style.display = hasRoute ? '' : (showCrewBar ? 'none' : '');
     crewBar.style.display = showCrewBar ? '' : 'none';
 
     if (!rs.crewEditMode || rs.selectedCrewIdx < 0 || !rs.selectedCrewType) {
@@ -1263,28 +1345,7 @@ export class UI {
       this.renderList();
     }
 
-    // Crew edit mode: handle crew interaction, or fall through to switch
-    else if (this.rs.crewEditMode) {
-      const crewHit = this._crewHitTest(w);
-      if (crewHit.idx >= 0) {
-        this.rs.selectCrewMember(crewHit.idx, crewHit.type, crewHit.pointIdx);
-        this.rs.draggingCrew = true;
-        this.canvas.setPointerCapture(e.pointerId);
-        return;
-      }
-      // Miss crew — try route segment to switch mode
-      const routeHit = this._routeHitTest(w);
-      if (routeHit) {
-        this.rs.exitCrewEdit();
-        this.rs.selectRoute(routeHit.type, routeHit.idx);
-        this.renderList();
-        return;
-      }
-      // Miss everything — exit crew edit mode and pan
-      this.rs.exitCrewEdit();
-    }
-
-    // Route edit mode: handle waypoint drag, right-click, or fall through to switch
+    // Route edit mode (may also have crew edit active): waypoint drag, crew, or switch
     else if (this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
       // Try waypoint drag first
       const pts = this._selectedPoints();
@@ -1304,11 +1365,10 @@ export class UI {
           return;
         }
       }
-      // Miss waypoint — try crew dot to switch mode
+      // Miss waypoint — try crew dot (enter crew edit, keep route selected)
       const crewHit = this._crewHitTest(w);
       if (crewHit.idx >= 0) {
-        this.rs.deselectRoute();
-        this.rs.enterCrewEdit();
+        if (!this.rs.crewEditMode) this.rs.enterCrewEdit();
         this.rs.selectCrewMember(crewHit.idx, crewHit.type, crewHit.pointIdx);
         this.rs.draggingCrew = true;
         this.canvas.setPointerCapture(e.pointerId);
@@ -1321,11 +1381,36 @@ export class UI {
         this.renderList();
         return;
       }
-      // Miss everything in route edit — deselect handoff if task edit active
+      // Miss everything in route edit
+      if (this.rs.crewEditMode) {
+        // Exit crew edit but keep route selected
+        this.rs.exitCrewEdit();
+      }
       if (this._taskEditActive && this._selectedHandoff >= 0) {
         this._selectedHandoff = -1;
         this._syncTaskRow();
       }
+    }
+
+    // Crew edit mode only (no route selected): handle crew interaction or switch
+    else if (this.rs.crewEditMode) {
+      const crewHit = this._crewHitTest(w);
+      if (crewHit.idx >= 0) {
+        this.rs.selectCrewMember(crewHit.idx, crewHit.type, crewHit.pointIdx);
+        this.rs.draggingCrew = true;
+        this.canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+      // Miss crew — try route segment to switch mode
+      const routeHit = this._routeHitTest(w);
+      if (routeHit) {
+        this.rs.exitCrewEdit();
+        this.rs.selectRoute(routeHit.type, routeHit.idx);
+        this.renderList();
+        return;
+      }
+      // Miss everything — exit crew edit mode
+      this.rs.exitCrewEdit();
     }
 
     // No edit mode — click-to-enter: test cat crew waypoints, crew dots, then route segments
@@ -1450,13 +1535,32 @@ export class UI {
       this.canvas.style.cursor = catHit.memberIdx >= 0 ? this._circleCrosshairCursor() : 'crosshair';
       return;
     }
-    // Crew edit mode: drag or hover
-    if (this.rs.crewEditMode) {
-      this._onCrewPointerMove(e);
+    // Route edit + optional crew edit: handle both
+    if (this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
+      // If crew is being dragged, handle that first
+      if (this.rs.crewEditMode && this.rs.draggingCrew) {
+        this._onCrewPointerMove(e);
+        return;
+      }
+      // Update crew hover state for scroll-wheel rotation in combined mode
+      if (this.rs.crewEditMode) {
+        const w = this._canvasWorld(e);
+        const hit = this._crewHitTest(w);
+        if (hit.idx !== this.rs.hoveredCrewIdx || hit.type !== this.rs.hoveredCrewType || hit.pointIdx !== this.rs.hoveredCrewPointIdx) {
+          this.rs.hoveredCrewIdx = hit.idx;
+          this.rs.hoveredCrewType = hit.type;
+          this.rs.hoveredCrewPointIdx = hit.pointIdx;
+          if (hit.idx >= 0) {
+            this.canvas.style.cursor = this._circleCrosshairCursor();
+          }
+        }
+      }
+      this._onRoutePointerMove(e);
       return;
     }
-    if (this.rs.selectedRoute >= 0 && this.rs.selectedRouteType) {
-      this._onRoutePointerMove(e);
+    // Crew edit mode only (no route): drag or hover
+    if (this.rs.crewEditMode) {
+      this._onCrewPointerMove(e);
       return;
     }
     // No edit mode: show cursor hint over clickable elements
@@ -1744,18 +1848,29 @@ export class UI {
 
     if (!route) return;
 
-    header.innerHTML = `<span>#</span><span>x</span><span>y</span><span>v</span><span></span>`;
-    header.style.gridTemplateColumns = '28px 1fr 1fr 60px 28px';
+    const isTakeoff = type === 'takeoff';
+    const extraLabel = isTakeoff ? '⌀' : 'desp';
+    header.innerHTML = `<span>#</span><span>x</span><span>y</span><span>v</span><span>${extraLabel}</span><span></span>`;
+    header.style.gridTemplateColumns = '28px 1fr 1fr 60px 52px 28px';
 
     points.forEach((p, i) => {
       const row = document.createElement('div');
       row.className = 'pt-row' + (i === this.rs.selectedWaypoint ? ' selected' : '');
-      row.style.gridTemplateColumns = '28px 1fr 1fr 60px 28px';
+      row.style.gridTemplateColumns = '28px 1fr 1fr 60px 52px 28px';
+      // Spawn diameter on first point (takeoff), despawn time on last point (landing)
+      const showExtra = (isTakeoff && i === 0) || (!isTakeoff && i === points.length - 1);
+      const extraVal = showExtra
+        ? (isTakeoff ? (route.terminalSize || 0) : (route.despawnTime || 0))
+        : '';
+      const extraCell = showExtra
+        ? `<input type="number" value="${extraVal}" step="1" min="0" data-i="${i}" data-k="${isTakeoff ? 'terminalSize' : 'despawnTime'}" style="width:100%">`
+        : `<span></span>`;
       row.innerHTML = `
         <span class="pt-idx">${i}</span>
         <input type="number" value="${p.x.toFixed(2)}" step="0.1" data-i="${i}" data-k="x">
         <input type="number" value="${p.y.toFixed(2)}" step="0.1" data-i="${i}" data-k="y">
         <input type="number" value="${(p.v ?? 1).toFixed(2)}" step="0.1" data-i="${i}" data-k="v" style="width:100%">
+        ${extraCell}
         <button class="del-btn" title="Remove">\u2715</button>
       `;
       row.querySelector('.del-btn').addEventListener('click', () => {
@@ -1768,7 +1883,13 @@ export class UI {
           if (isNaN(val)) return;
           const idx = +inp.dataset.i;
           const key = inp.dataset.k;
-          if (key === 'v') {
+          if (key === 'terminalSize') {
+            route.terminalSize = val > 0 ? val : null;
+            this.rs._notify();
+          } else if (key === 'despawnTime') {
+            route.despawnTime = val > 0 ? val : null;
+            this.rs._notify();
+          } else if (key === 'v') {
             route.points[idx].v = val;
             this.rs._notify();
           } else {
@@ -1834,10 +1955,54 @@ export class UI {
     }
   }
 
+  // ── Elevator helpers ──────────────────────────────────────────────────
+  _loadElevators(elevators) {
+    // Merge parsed elevator entries into state (group by elevatorIdx, take first type)
+    for (const el of elevators) {
+      this.rs.elevatorTypes[el.elevatorIdx] = el.elevatorType;
+    }
+    this._syncElevatorUI();
+  }
+
+  _syncElevatorUI() {
+    document.querySelectorAll('.elevator-type').forEach(sel => {
+      const idx = parseInt(sel.dataset.el);
+      sel.value = this.rs.elevatorTypes[idx] ?? 0;
+    });
+  }
+
+  // ── Blocker terminal helpers ─────────────────────────────────────────
+  _loadBlockerTerminals(terminals) {
+    this.rs.blockerTerminals = new Set(terminals);
+    this._buildBlockerGrid();
+  }
+
+  _buildBlockerGrid() {
+    const grid = document.getElementById('blocker-grid');
+    grid.innerHTML = '';
+    const count = this.rs.landingRoutes.length;
+    for (let i = 1; i <= count; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'blocker-btn' + (this.rs.blockerTerminals.has(i) ? ' active' : '');
+      btn.textContent = i;
+      btn.addEventListener('click', () => {
+        if (this.rs.blockerTerminals.has(i)) {
+          this.rs.blockerTerminals.delete(i);
+        } else {
+          this.rs.blockerTerminals.add(i);
+        }
+        btn.classList.toggle('active', this.rs.blockerTerminals.has(i));
+        this.rs._notify();
+      });
+      grid.appendChild(btn);
+    }
+  }
+
   _resize() {
     const rect = this.canvas.getBoundingClientRect();
     this.canvas.width = Math.min(rect.width, 2048);
-    this.canvas.height = 500;
+    if (!this._canvasHeight) this._canvasHeight = 750;
+    this.canvas.height = this._canvasHeight;
     this.viewport.equalizeScale(this.canvas.width, this.canvas.height);
     this._update();
   }

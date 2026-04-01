@@ -24,6 +24,15 @@ class RouteState {
     this.landingVisible = false;
     this.landingRouteVisible = new Array(LANDING_ROUTES.length).fill(false);
 
+    this.showParkedTakeoff = false;
+    this.showParkedLanding = false;
+
+    // Elevator types: index 1-4, value 0=SPAWN, 1=DESPAWN, 2=BOTH
+    this.elevatorTypes = { 1: 0, 2: 0, 3: 0, 4: 0 };
+
+    // Blocker terminals: Set of 1-based landing terminal indices
+    this.blockerTerminals = new Set();
+
     this.crewVisible = new Array(CREW_MEMBERS.length).fill(true);
     this.crewActiveVisible = new Array(CREW_ROUTES.length).fill(true);
 
@@ -205,13 +214,8 @@ class RouteState {
   // ── Crew editing ──────────────────────────────────────────────────
 
   enterCrewEdit() {
-    // Mutual exclusivity: exit cat crew edit and route edit
+    // Exit cat crew edit, but keep route edit active if present
     if (this.catCrewEditMode) this._resetCatCrewEdit();
-    if (this.selectedRoute >= 0) {
-      this.selectedRouteType = null;
-      this.selectedRoute = -1;
-      this.draggingPoint = -1;
-    }
     this.crewEditMode = true;
     this.selectedCrewType = null;
     this.selectedCrewIdx = -1;

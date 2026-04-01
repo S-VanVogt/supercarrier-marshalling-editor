@@ -97,9 +97,13 @@ function buildPointsInner(route) {
     const z = formatNum(p.y);  // JS y → Lua z
     const v = formatNum(p.v);
     let line = `\t\t\t{{${x},\t${DECK_HEIGHT},\t\t${z}},\t${v}`;
-    // Terminal size only on first point
+    // Terminal size only on first point (takeoff spawn diameter)
     if (j === 0 && route.terminalSize) {
       line += `,\t${formatNum(route.terminalSize)}`;
+    }
+    // Despawn time only on last point (landing despawn)
+    if (j === route.points.length - 1 && route.despawnTime) {
+      line += `,\t${formatNum(route.despawnTime)}`;
     }
     line += '}';
     // Trailing comma except on last point
@@ -172,6 +176,199 @@ export function parseTakeoffRoutes(luaText) {
 }
 
 /**
+ * Find landing route blocks within GT.TaxiRoutes section.
+ * Landing routes are bare arrays { point1, point2, ... } without "Points =" keyword.
+ * We find each top-level child { ... } of the outer GT.TaxiRoutes table.
+ */
+function findLandingPointsBlocks(lua) {
+  const sectionStart = lua.indexOf('GT.TaxiRoutes =');
+  if (sectionStart < 0) return [];
+  // Find the opening brace of the outer table (skip any comment lines)
+  let topBrace = -1;
+  for (let i = sectionStart + 15; i < lua.length; i++) {
+    if (lua[i] === '{') { topBrace = i; break; }
+    if (lua[i] === '\n' || lua[i] === ' ' || lua[i] === '\t' || lua[i] === '\r') continue;
+    if (lua[i] === '-' && lua[i + 1] === '-') {
+      const eol = lua.indexOf('\n', i);
+      if (eol >= 0) { i = eol; continue; }
+      break;
+    }
+    break;
+  }
+  if (topBrace < 0) return [];
+  const sectionEnd = lua.indexOf('GT.TaxiRoutes.RoutesNumber', topBrace);
+  if (sectionEnd < 0) return [];
+
+  const blocks = [];
+  let i = topBrace + 1; // skip the outer '{'
+  while (i < sectionEnd) {
+    // Skip whitespace
+    if (lua[i] === ' ' || lua[i] === '\t' || lua[i] === '\n' || lua[i] === '\r' || lua[i] === ',') { i++; continue; }
+    // Skip line comments
+    if (lua[i] === '-' && lua[i + 1] === '-') {
+      if (lua[i + 2] === '[' && lua[i + 3] === '[') {
+        const endComment = lua.indexOf('--]]', i + 4);
+        if (endComment >= 0) { i = endComment + 4; continue; }
+        break;
+      }
+      const eol = lua.indexOf('\n', i);
+      if (eol >= 0) { i = eol + 1; continue; }
+      break;
+    }
+    // Found a child block '{'
+    if (lua[i] === '{') {
+      const blockStart = i;
+      let depth = 0, j = i;
+      while (j < sectionEnd) {
+        if (lua[j] === '-' && lua[j + 1] === '-') {
+          const eol = lua.indexOf('\n', j);
+          if (eol >= 0) { j = eol + 1; continue; }
+          break;
+        }
+        if (lua[j] === '{') depth++;
+        if (lua[j] === '}') {
+          depth--;
+          if (depth === 0) {
+            // blockStart+1 to j is the inner content (exclusive of outer braces)
+            blocks.push({ pointsStart: blockStart + 1, pointsEnd: j });
+            i = j + 1;
+            break;
+          }
+        }
+        j++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return blocks;
+}
+
+/**
+ * Parse landing routes from a Lua file text.
+ * Extracts points and despawnTime from last point's extra value.
+ */
+export function parseLandingRoutes(luaText) {
+  const blocks = findLandingPointsBlocks(luaText);
+  if (blocks.length === 0) return null;
+
+  const routes = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const rawInner = luaText.slice(blocks[i].pointsStart, blocks[i].pointsEnd);
+    const inner = rawInner.replace(/^[ \t]*--.*$/gm, '');
+
+    const points = [];
+    const extras = []; // extra value per point (despawn on last)
+    const pointRe = /\{\{\s*([^,]+),\s*[^,]+,\s*([^}]+)\}\s*,\s*([0-9.\-]+)(?:\s*,\s*([0-9.\-*\s]+))?\s*\}/g;
+    let m;
+    while ((m = pointRe.exec(inner)) !== null) {
+      const x = parseFloat(m[1].trim());
+      const z = parseFloat(m[2].trim());
+      const v = parseFloat(m[3].trim());
+      if (isNaN(x) || isNaN(z) || isNaN(v)) continue;
+      let extra = null;
+      if (m[4]) {
+        // Handle expressions like 3.0*60.0
+        const expr = m[4].trim();
+        try { extra = Function('"use strict";return (' + expr + ')')(); } catch { extra = parseFloat(expr); }
+      }
+      extras.push(extra);
+      points.push({ x, y: z, v });
+    }
+
+    let despawnTime = null;
+    if (extras.length > 0 && extras[extras.length - 1] != null) {
+      despawnTime = extras[extras.length - 1];
+    }
+
+    routes.push({
+      id: i + 1,
+      label: `Landing ${i + 1}`,
+      despawnTime,
+      points,
+    });
+  }
+  return routes;
+}
+
+/**
+ * Parse elevator data from Lua text.
+ * Returns array of { elevatorIdx, elevatorType, terminalIdx, points }.
+ */
+export function parseElevators(luaText) {
+  const start = luaText.indexOf('GT.Elevators');
+  if (start < 0) return null;
+  const brace = luaText.indexOf('{', luaText.indexOf('\n', start));
+  if (brace < 0) return null;
+  const end = luaText.indexOf('GT.Elevators.ElevatorsNumber', brace);
+  if (end < 0) return null;
+  const section = luaText.slice(brace, end);
+
+  const elevators = [];
+  const entryRe = /ElevatorIdx\s*=\s*(\d+)\s*,\s*ElevatorType\s*=\s*(\d+)\s*,\s*TerminalIdx\s*=\s*(\d+)/g;
+  let m;
+  while ((m = entryRe.exec(section)) !== null) {
+    elevators.push({
+      elevatorIdx: parseInt(m[1]),
+      elevatorType: parseInt(m[2]),
+      terminalIdx: parseInt(m[3]),
+    });
+  }
+  return elevators;
+}
+
+/**
+ * Patch elevator types in original Lua text.
+ * @param {string} lua Original text
+ * @param {object[]} elevators Array of { elevatorIdx, elevatorType, terminalIdx }
+ * @returns {string} Patched text
+ */
+export function patchElevators(lua, elevators) {
+  let result = lua;
+  // Patch each entry's ElevatorType value
+  const start = result.indexOf('GT.Elevators');
+  if (start < 0) return result;
+  const end = result.indexOf('GT.Elevators.ElevatorsNumber', start);
+  if (end < 0) return result;
+
+  let section = result.slice(start, end);
+  for (const el of elevators) {
+    // Find the entry with matching ElevatorIdx and TerminalIdx
+    const re = new RegExp(
+      `(ElevatorIdx\\s*=\\s*${el.elevatorIdx}\\s*,\\s*ElevatorType\\s*=\\s*)(\\d+)(\\s*,\\s*TerminalIdx\\s*=\\s*${el.terminalIdx})`
+    );
+    section = section.replace(re, `$1${el.elevatorType}$3`);
+  }
+  return result.slice(0, start) + section + result.slice(end);
+}
+
+/**
+ * Parse blocker terminals from Lua text.
+ * Returns array of 1-based terminal indices, or null if not found.
+ */
+export function parseBlockerTerminals(luaText) {
+  const m = luaText.match(/GT\.BlockerTerminals\s*=\s*\{([^}]*)\}/);
+  if (!m) return null;
+  const nums = m[1].match(/\d+/g);
+  return nums ? nums.map(Number) : [];
+}
+
+/**
+ * Patch blocker terminals in original Lua text.
+ * @param {string} lua Original text
+ * @param {number[]} terminals Array of 1-based terminal indices
+ * @returns {string} Patched text
+ */
+export function patchBlockerTerminals(lua, terminals) {
+  const sorted = [...terminals].sort((a, b) => a - b);
+  const listStr = sorted.join(',');
+  return lua.replace(
+    /GT\.BlockerTerminals\s*=\s*\{[^}]*\}/,
+    `GT.BlockerTerminals = {${listStr}}`
+  );
+}
+
+/**
  * Patch the original Lua text with edited route data.
  * @param {string} originalLua  The original file text.
  * @param {object[]} editedRoutes  The 16 edited route objects from routeState.
@@ -194,10 +391,51 @@ export function patchLua(originalLua, editedRoutes) {
 }
 
 /**
+ * Patch landing route data in the original Lua text.
+ * @param {string} originalLua  The original file text.
+ * @param {object[]} editedRoutes  The edited landing route objects.
+ * @returns {string} The patched Lua text.
+ */
+export function patchLandingLua(originalLua, editedRoutes) {
+  const blocks = findLandingPointsBlocks(originalLua);
+  if (blocks.length === 0) return originalLua;
+  if (blocks.length !== editedRoutes.length) {
+    console.warn(`Landing route count mismatch: file has ${blocks.length}, editor has ${editedRoutes.length}`);
+  }
+  const count = Math.min(blocks.length, editedRoutes.length);
+
+  let result = originalLua;
+  // Patch in reverse order to preserve offsets
+  for (let i = count - 1; i >= 0; i--) {
+    const { pointsStart, pointsEnd } = blocks[i];
+    const newInner = buildPointsInner(editedRoutes[i]);
+    result = result.slice(0, pointsStart) + newInner + result.slice(pointsEnd);
+  }
+  return result;
+}
+
+/**
  * Download the patched Lua file as a Blob.
  */
-export function downloadPatchedLua(originalLua, editedRoutes, headerComment) {
+export function downloadPatchedLua(originalLua, editedRoutes, headerComment, elevatorTypes, blockerTerminals, landingRoutes) {
   let patched = patchLua(originalLua, editedRoutes);
+  // Patch landing routes if provided
+  if (landingRoutes) {
+    patched = patchLandingLua(patched, landingRoutes);
+  }
+  // Patch elevator types if provided
+  if (elevatorTypes) {
+    const entries = [];
+    for (const [idx, type] of Object.entries(elevatorTypes)) {
+      entries.push({ elevatorIdx: parseInt(idx), elevatorType: type, terminalIdx: 1 });
+      entries.push({ elevatorIdx: parseInt(idx), elevatorType: type, terminalIdx: 2 });
+    }
+    patched = patchElevators(patched, entries);
+  }
+  // Patch blocker terminals if provided
+  if (blockerTerminals) {
+    patched = patchBlockerTerminals(patched, blockerTerminals);
+  }
   if (headerComment && headerComment.startsWith('-- [SC-Config]')) {
     // Pre-formatted stamp: strip old stamp lines, prepend new stamp
     patched = patched.split('\n').filter(l => !l.startsWith('-- [SC-Config]')).join('\n');

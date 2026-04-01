@@ -3,13 +3,19 @@
   v0.1.15 — Task edit UI: handoff boxes, vertex ticks, orange/gray crew lines,
              right-click assign mode, add/delete steps, cat selector, Related filter,
              click-to-deselect, brown box at t=0, stable value display
+  v0.1.16 — Version number shown in page title and heading
+  v0.1.17 — Combined route+crew edit: click crew dots while route/task edit stays active
+  v0.1.18 — Fix scroll-wheel crew rotation in combined mode, progress bar click deselects crew
+  v0.1.19 — Related button moved to idle panel, filters active routes + takeoff/landing routes
+  v0.1.20 — Show parked F-14 outlines on visible takeoff/landing routes (Parked toggle)
+  v0.1.21 — Spawn diameter/despawn time spinners in points panel, Elevators section with type selectors
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor</title>
+  <title>SuperCarrier Marshalling Editor v0.1.21</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -17,9 +23,10 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.21</h1>
     </div>
-    <canvas id="c" height="500"></canvas>
+    <canvas id="c" height="750"></canvas>
+    <div class="canvas-resize-handle" id="canvas-resize-handle"></div>
     <p class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</p>
     <div class="progress-area" id="progress-bar">
       <div class="vertex-tick-row" id="vertex-tick-row">
@@ -29,9 +36,11 @@
       </div>
       <div class="progress-row">
         <span class="progress-label">Progress:</span>
-        <input type="range" min="0" max="100" value="0" id="tslider" style="flex:1;min-width:120px">
-        <span id="tval" style="min-width:32px">0.00</span>
-        <span class="coord-out" id="coordout">x: &mdash;, y: &mdash;</span>
+        <input type="range" min="0" max="100" value="0" id="tslider">
+        <div class="progress-right">
+          <span id="tval" style="min-width:32px">0.00</span>
+          <span class="coord-out" id="coordout">x: &mdash;, y: &mdash;</span>
+        </div>
       </div>
       <div class="task-sub-row">
         <div class="task-brown-box" id="task-brown-box"></div>
@@ -64,14 +73,16 @@
       <div class="panel-col">
         <div class="col-header">
           <span class="col-title">Takeoff Routes</span>
-          <label class="col-show-all"><span>Show all</span><input type="checkbox" id="takeoff-global" checked></label>
+          <button class="col-toggle-btn" id="takeoff-parked">Parked</button>
+          <button class="col-toggle-btn" id="takeoff-global">Show none</button>
         </div>
         <div class="route-list" id="takeoff-route-list"></div>
       </div>
       <div class="panel-col">
         <div class="col-header">
           <span class="col-title">Landing Routes</span>
-          <label class="col-show-all"><span>Show all</span><input type="checkbox" id="landing-global"></label>
+          <button class="col-toggle-btn" id="landing-parked">Parked</button>
+          <button class="col-toggle-btn" id="landing-global">Show all</button>
         </div>
         <div class="route-list" id="landing-route-list"></div>
       </div>
@@ -91,6 +102,55 @@
         </div>
       </div>
     </div>
+    <div class="elevator-section" id="elevator-section">
+      <div class="subsection-row">
+      <div class="subsection-block">
+      <div class="elevator-header">
+        <span class="col-title">Elevators</span>
+      </div>
+      <div class="elevator-grid">
+        <div class="elevator-item" data-el="1">
+          <span class="elevator-label">El 1</span>
+          <select class="elevator-type" data-el="1">
+            <option value="0">Spawn</option>
+            <option value="1">Despawn</option>
+            <option value="2">Both</option>
+          </select>
+        </div>
+        <div class="elevator-item" data-el="2">
+          <span class="elevator-label">El 2</span>
+          <select class="elevator-type" data-el="2">
+            <option value="0">Spawn</option>
+            <option value="1">Despawn</option>
+            <option value="2">Both</option>
+          </select>
+        </div>
+        <div class="elevator-item" data-el="3">
+          <span class="elevator-label">El 3</span>
+          <select class="elevator-type" data-el="3">
+            <option value="0">Spawn</option>
+            <option value="1">Despawn</option>
+            <option value="2">Both</option>
+          </select>
+        </div>
+        <div class="elevator-item" data-el="4">
+          <span class="elevator-label">El 4</span>
+          <select class="elevator-type" data-el="4">
+            <option value="0">Spawn</option>
+            <option value="1">Despawn</option>
+            <option value="2">Both</option>
+          </select>
+        </div>
+      </div>
+      </div>
+      <div class="subsection-block">
+      <div class="elevator-header">
+        <span class="col-title">Blocker Terminals</span>
+      </div>
+      <div class="blocker-grid" id="blocker-grid"></div>
+      </div>
+      </div>
+    </div>
   </details>
 
   <!-- Crew: 2-column (Idle | Active) -->
@@ -100,6 +160,7 @@
       <div class="panel-col">
         <div class="col-header">
           <span class="col-title">Idle Positions (members)</span>
+          <button class="col-filter-btn" id="crew-related-filter" title="Show only routes and positions used by selected idle member">Related</button>
           <label class="col-show-all"><span>Show all</span><input type="checkbox" id="crew-idle-global" checked></label>
         </div>
         <div class="route-list" id="crew-idle-list"></div>
@@ -107,7 +168,6 @@
       <div class="panel-col">
         <div class="col-header">
           <span class="col-title">Active Positions (routes)</span>
-          <button class="col-filter-btn" id="crew-active-filter" title="Show only routes used by selected idle member">Related</button>
           <label class="col-show-all"><span>Show all</span><input type="checkbox" id="crew-active-global" checked></label>
         </div>
         <div class="route-list" id="crew-active-list"></div>

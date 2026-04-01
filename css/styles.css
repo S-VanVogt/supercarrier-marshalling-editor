@@ -118,6 +118,7 @@ h1 { font-size: 18px; font-weight: 500; margin: 0; }
 .col-header {
   display: flex;
   align-items: center;
+  gap: 10px;
   padding: 4px 0 6px;
   border-bottom: 0.5px solid #d3d1c7;
   margin-bottom: 4px;
@@ -142,6 +143,22 @@ h1 { font-size: 18px; font-weight: 500; margin: 0; }
 
 .col-show-all input[type="checkbox"] {
   margin: 0;
+}
+
+.col-toggle-btn {
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 0.5px solid #b4b2a9;
+  border-radius: 4px;
+  background: #fff;
+  color: #5f5e5a;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.col-toggle-btn.active {
+  background: #e8e5dc;
+  border-color: #999;
+  color: #1a1a18;
 }
 
 .col-filter-btn {
@@ -172,6 +189,18 @@ canvas {
   width: 100%;
   cursor: crosshair;
   touch-action: none;            /* allow pointer events on mobile */
+}
+
+.canvas-resize-handle {
+  height: 6px;
+  cursor: ns-resize;
+  background: linear-gradient(to bottom, #d3d1c7 1px, transparent 1px, transparent 3px, #d3d1c7 3px, #d3d1c7 4px, transparent 4px);
+  margin: 0 40px;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.canvas-resize-handle:hover {
+  opacity: 1;
 }
 
 /* ── Shared form elements ────────────────────────────────────────────────── */
@@ -217,32 +246,36 @@ button:hover { background: #f1efe8; }
 /* ── Progress area with task editing ──────────────────────────────────── */
 .progress-area {
   margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  column-gap: 14px;
 }
 .progress-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+  display: contents;
   font-size: 13px;
   color: #5f5e5a;
 }
+.progress-row > * { font-size: 13px; color: #5f5e5a; }
 .progress-label {
   white-space: nowrap;
+  align-self: center;
 }
-.vertex-tick-row {
+.progress-right {
   display: flex;
+  align-items: center;
   gap: 14px;
-  height: 0;
-  overflow: visible;
-  position: relative;
+}
+#tslider { min-width: 120px; align-self: center; }
+.vertex-tick-row {
+  display: contents;
 }
 .vertex-tick-spacer {
-  width: 52.25px;
-  flex-shrink: 0;
+  height: 0;
 }
 .vertex-tick-track {
-  flex: 1;
   position: relative;
   height: 0;
+  overflow: visible;
   margin: 0 11px;
 }
 .vertex-tick {
@@ -266,30 +299,22 @@ button:hover { background: #f1efe8; }
   margin-top: 1px;
 }
 .vertex-tick-right-spacer {
-  width: 254px;
-  flex-shrink: 0;
+  height: 0;
 }
 
 .task-sub-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  position: relative;
-  margin-top: 0;
-  min-height: 20px;
+  display: contents;
 }
 .task-brown-box {
-  width: 52.25px;
-  flex-shrink: 0;
   display: flex;
   justify-content: center;
+  align-self: center;
+  min-height: 20px;
 }
 .task-handoff-track {
-  flex: 1;
   min-height: 36px;
   min-width: 120px;
   position: relative;
-  /* Match slider thumb radius so 0%/100% align with thumb center */
   margin: 0 11px;
 }
 .task-crew-box {
@@ -359,8 +384,6 @@ button:hover { background: #f1efe8; }
   display: flex;
   align-items: center;
   gap: 14px;
-  flex-shrink: 0;
-  min-width: 254px;
 }
 .task-right-spacer {
   /* Match tval width so handoff-val aligns with coordout */
@@ -613,6 +636,73 @@ button:hover { background: #f1efe8; }
   font-size: 12px;
   color: #5f5e5a;
   cursor: pointer;
+}
+
+/* ── Elevator / Blocker section ────────────────────────────────────────── */
+.elevator-section {
+  padding: 6px 8px;
+  border-top: 0.5px solid #d3d1c7;
+  margin-top: 4px;
+}
+.subsection-row {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.subsection-block {
+  display: flex;
+  flex-direction: column;
+}
+.elevator-header {
+  padding: 2px 0 4px;
+}
+.elevator-grid {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.elevator-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.elevator-label {
+  font-weight: 600;
+  color: #1a1a18;
+  white-space: nowrap;
+}
+.elevator-type {
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 0.5px solid #b4b2a9;
+  border-radius: 6px;
+  background: #fff;
+  outline: none;
+}
+.blocker-grid {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.blocker-btn {
+  width: 24px;
+  height: 22px;
+  font-size: 10px;
+  font-weight: 600;
+  border: 0.5px solid #b4b2a9;
+  border-radius: 4px;
+  background: #fff;
+  color: #5f5e5a;
+  cursor: pointer;
+  padding: 0;
+  line-height: 22px;
+  text-align: center;
+}
+.blocker-btn.active {
+  background: #D04848;
+  color: #fff;
+  border-color: #b03030;
 }
 
 .route-list {

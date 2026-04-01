@@ -24,7 +24,7 @@ export class Renderer {
     this._f14Img.onload = () => { this._f14Ready = true; };
     // SVG dimensions: nose at x≈724, tail at x≈93, centerline y≈635
     // Real F-14 length ≈ 19.1m. SVG length ≈ 631px. Scale: 19.1/631 ≈ 0.0303 world units/px
-    this._f14Scale = 19.1 / 631;
+    this._f14Scale = 19.1 / 631 * 0.98;
     this._f14CenterX = (724 + 93) / 2;  // SVG center X
     this._f14CenterY = 635;              // SVG centerline Y
   }
@@ -592,6 +592,19 @@ export class Renderer {
       ctx.fillText(route.id, p0c.x + nx * off, p0c.y + ny * off);
     }
 
+    // Parked planes at start of visible takeoff routes
+    if (rs.showParkedTakeoff && this._f14Ready) {
+      for (let i = 0; i < rs.takeoffRoutes.length; i++) {
+        if (!rs.isTakeoffRouteVisible(i)) continue;
+        if (rs.selectedRouteType === 'takeoff' && rs.selectedRoute === i) continue;
+        const route = rs.takeoffRoutes[i];
+        const pts = route.points;
+        if (pts.length < 2) continue;
+        const rpt = polylinePoint(pts, 0);
+        if (rpt) this._drawF14Overlay(ctx, rpt, pts, false, 0, 0.2);
+      }
+    }
+
     ctx.restore();
   }
 
@@ -682,6 +695,19 @@ export class Renderer {
       ctx.fillText(route.id, p0c.x + nx * off, p0c.y + ny * off);
     }
 
+    // Parked planes at end of visible landing routes
+    if (rs.showParkedLanding && this._f14Ready) {
+      for (let i = 0; i < rs.landingRoutes.length; i++) {
+        if (!rs.isLandingRouteVisible(i)) continue;
+        if (rs.selectedRouteType === 'landing' && rs.selectedRoute === i) continue;
+        const route = rs.landingRoutes[i];
+        const pts = route.points;
+        if (pts.length < 2) continue;
+        const rpt = polylinePoint(pts, 1);
+        if (rpt) this._drawF14Overlay(ctx, rpt, pts, true, 1, 0.2);
+      }
+    }
+
     ctx.restore();
   }
 
@@ -695,7 +721,7 @@ export class Renderer {
   }
 
   /** Draw F-14 silhouette at the route progress marker position. */
-  _drawF14Overlay(ctx, rpt, pts, landing, t) {
+  _drawF14Overlay(ctx, rpt, pts, landing, t, alpha) {
     if (!this._f14Ready) { console.warn('F14 image not ready'); return; }
 
     const si = rpt.segIndex;
@@ -725,8 +751,8 @@ export class Renderer {
     ctx.save();
     ctx.translate(cp.x, cp.y);
     ctx.rotate(heading);
-    ctx.globalAlpha = 0.5;
-    ctx.drawImage(this._f14Img, -offsetX, -offsetY, drawW, drawH);
+    ctx.globalAlpha = alpha != null ? alpha : 0.5;
+    ctx.drawImage(this._f14Img, -offsetX + 0.15 * drawW, -offsetY, drawW, drawH);
     ctx.globalAlpha = 1.0;
     ctx.restore();
   }
@@ -789,7 +815,7 @@ export class Renderer {
         ctx.beginPath();
         ctx.moveTo(idleC.x, idleC.y);
         ctx.lineTo(firstC.x, firstC.y);
-        ctx.strokeStyle = 'rgba(160,160,160,0.4)';
+        ctx.strokeStyle = 'rgba(120,120,120,0.55)';
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
         ctx.stroke();
@@ -806,7 +832,7 @@ export class Renderer {
           ctx.beginPath();
           ctx.moveTo(prevC.x, prevC.y);
           ctx.lineTo(curC.x, curC.y);
-          ctx.strokeStyle = 'rgba(160,160,160,0.4)';
+          ctx.strokeStyle = 'rgba(120,120,120,0.55)';
           ctx.lineWidth = 1;
           ctx.setLineDash([3, 3]);
           ctx.stroke();
@@ -848,7 +874,7 @@ export class Renderer {
         ctx.beginPath();
         ctx.moveTo(idleC.x, idleC.y);
         ctx.lineTo(activeC.x, activeC.y);
-        ctx.strokeStyle = 'rgba(160,160,160,0.4)';
+        ctx.strokeStyle = 'rgba(120,120,120,0.55)';
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
         ctx.stroke();
@@ -917,7 +943,7 @@ export class Renderer {
       ctx.beginPath();
       ctx.moveTo(idleC.x, idleC.y);
       ctx.lineTo(firstC.x, firstC.y);
-      ctx.strokeStyle = useColor ? 'rgba(160,160,160,0.4)' : 'rgba(160,160,160,0.35)';
+      ctx.strokeStyle = useColor ? 'rgba(120,120,120,0.55)' : 'rgba(160,160,160,0.35)';
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 3]);
       ctx.stroke();
@@ -933,7 +959,7 @@ export class Renderer {
           ctx.beginPath();
           ctx.moveTo(prevC.x, prevC.y);
           ctx.lineTo(c.x, c.y);
-          ctx.strokeStyle = useColor ? 'rgba(160,160,160,0.4)' : 'rgba(160,160,160,0.35)';
+          ctx.strokeStyle = useColor ? 'rgba(120,120,120,0.55)' : 'rgba(160,160,160,0.35)';
           ctx.lineWidth = 1;
           ctx.setLineDash([3, 3]);
           ctx.stroke();
@@ -1051,7 +1077,7 @@ export class Renderer {
         ctx.beginPath();
         ctx.moveTo(c.x, c.y);
         ctx.lineTo(ax, ay);
-        ctx.strokeStyle = 'rgba(160,160,160,0.4)';
+        ctx.strokeStyle = 'rgba(120,120,120,0.55)';
         ctx.lineWidth = 1;
         ctx.stroke();
       }
