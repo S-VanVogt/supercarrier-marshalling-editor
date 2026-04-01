@@ -42,8 +42,14 @@ export class UI {
     this._selectedHandoff = -1;  // step index, -1 = none
     this._draggingHandoff = false;
 
+    // Assign mode state (right-click handoff box → click crew on canvas)
+    this._assignMode = false;
+    this._assignStepIdx = -1;   // step index being assigned
+    this._assignIsBrown = false; // true if assigning the brown crew
+
     this._bindEvents();
     this._buildRoutePanels();
+    this._syncRoutePanel();
     this.renderList();
   }
 
@@ -85,7 +91,18 @@ export class UI {
     document.getElementById('btn-edit-task').addEventListener('click', () => {
       this._taskEditActive = !this._taskEditActive;
       this._selectedHandoff = -1;
+      this._exitAssignMode();
       this._syncTaskRow();
+    });
+    // Add/Delete step buttons
+    document.getElementById('btn-task-add').addEventListener('click', () => this._addTaskStep());
+    document.getElementById('btn-task-delete').addEventListener('click', () => this._deleteTaskStep());
+    // Click track background to deselect handoff
+    document.getElementById('task-handoff-track').addEventListener('mousedown', (e) => {
+      if (e.target === e.currentTarget && this._selectedHandoff >= 0) {
+        this._selectedHandoff = -1;
+        this._syncTaskRow();
+      }
     });
 
     // Handoff box dragging (document-level)
@@ -281,6 +298,9 @@ export class UI {
     document.getElementById('crew-active-global').addEventListener('change', e => {
       this.rs.setAllCrewActive(e.target.checked);
     });
+    document.getElementById('crew-active-filter').addEventListener('click', () => {
+      this._filterActiveBySelectedIdle();
+    });
 
     // ── Catapult crew panel ──────────────────────────────────────────────
     document.getElementById('chk-catcrew-visible').addEventListener('change', e => {
@@ -367,6 +387,39 @@ export class UI {
 
     this._memberRefs = memberRefs;
     this._routeRefs = routeRefs;
+
+    // member → Set of active route IDs (for "Related" filter)
+    const memberToRoutes = new Map();
+    TAKEOFF_TASKS.forEach(task => {
+      const ensureM = id => { if (!memberToRoutes.has(id)) memberToRoutes.set(id, new Set()); return memberToRoutes.get(id); };
+      ensureM(task.brownId).add(task.brownRouteId);
+      for (const step of task.steps) {
+        if (step.routeId >= 0) ensureM(step.memberId).add(step.routeId);
+      }
+    });
+    PARKING_TASKS.forEach(task => {
+      const ensureM = id => { if (!memberToRoutes.has(id)) memberToRoutes.set(id, new Set()); return memberToRoutes.get(id); };
+      for (const step of task.steps) {
+        if (step.routeId >= 0) ensureM(step.memberId).add(step.routeId);
+      }
+    });
+    this._memberToRoutes = memberToRoutes;
+  }
+
+  _filterActiveBySelectedIdle() {
+    const rs = this.rs;
+    // Only works when an idle member is selected
+    if (!rs.crewEditMode || rs.selectedCrewType !== 'idle' || rs.selectedCrewIdx < 0) return;
+    const memberId = rs.selectedCrewIdx;
+    const relatedRoutes = this._memberToRoutes.get(memberId);
+    if (!relatedRoutes || relatedRoutes.size === 0) return;
+
+    // Turn off all active routes, then turn on only the related ones
+    for (let i = 0; i < rs.crewActiveVisible.length; i++) {
+      rs.crewActiveVisible[i] = relatedRoutes.has(i);
+    }
+    rs._notify();
+    this.renderList();
   }
 
   _crewRefLabel(refs) {
@@ -659,6 +712,11 @@ export class UI {
     document.getElementById('crew-idle-global').checked = this.rs.allCrewVisible();
     document.getElementById('crew-active-global').checked = this.rs.allCrewActiveVisible();
 
+    // Enable "Related" filter button only when an idle member is selected
+    const filterBtn = document.getElementById('crew-active-filter');
+    const hasIdleSelected = this.rs.crewEditMode && this.rs.selectedCrewType === 'idle' && this.rs.selectedCrewIdx >= 0;
+    filterBtn.disabled = !hasIdleSelected;
+
     // Crew active sync
     const activeRows = document.querySelectorAll('#crew-active-list .route-row');
     for (let i = 0; i < activeRows.length; i++) {
@@ -742,6 +800,14 @@ export class UI {
     track.style.visibility = showContent ? '' : 'hidden';
     valSpan.style.visibility = showContent ? '' : 'hidden';
 
+    // Add/Delete buttons
+    const actionGroup = document.getElementById('task-action-group');
+    const delBtn = document.getElementById('btn-task-delete');
+    actionGroup.classList.toggle('visible', !!showContent);
+    if (showContent) {
+      delBtn.disabled = this._selectedHandoff < 0 || !task.steps || this._selectedHandoff >= task.steps.length;
+    }
+
     if (!showContent) {
       this._selectedHandoff = -1;
       brownBox.innerHTML = '';
@@ -772,6 +838,12 @@ export class UI {
       brownCrewBox.style.left = `calc(${nudged[0] * 100}% - ${boxW / 2}px)`;
       brownCrewBox.classList.remove('static-brown');
       brownCrewBox.style.cursor = 'default';
+      if (this._assignMode && this._assignIsBrown) brownCrewBox.classList.add('assigning');
+      // Right-click to enter assign mode
+      brownCrewBox.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this._enterAssignMode(-1, true);
+      });
       track.appendChild(brownCrewBox);
       // Remove the brown entry from nudged so step indices stay aligned
       nudged.shift();
@@ -784,9 +856,11 @@ export class UI {
       box.style.left = `calc(${nudged[si] * 100}% - ${boxW / 2}px)`;
       box.dataset.stepIdx = si;
       if (si === this._selectedHandoff) box.classList.add('selected');
+      if (this._assignMode && !this._assignIsBrown && this._assignStepIdx === si) box.classList.add('assigning');
 
-      // Click to select
+      // Click to select + drag
       box.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
         this._selectedHandoff = si;
         this._draggingHandoff = true;
         this._dragTrack = track;
@@ -794,19 +868,26 @@ export class UI {
         e.preventDefault();
         this._syncTaskRow();
       });
+      // Right-click to enter assign mode
+      box.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this._enterAssignMode(si, false);
+      });
 
       track.appendChild(box);
     }
 
-    // Handoff value display
+    // Handoff value display — always show when task edit is active
     valSpan.innerHTML = '';
-    if (this._selectedHandoff >= 0 && this._selectedHandoff < steps.length) {
-      const step = steps[this._selectedHandoff];
-      const increment = 0.005;
+    const hasSelection = this._selectedHandoff >= 0 && this._selectedHandoff < steps.length;
+    const step = hasSelection ? steps[this._selectedHandoff] : null;
+    const increment = 0.005;
 
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = step.progress.toFixed(3);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = step ? step.progress.toFixed(3) : '--';
+    input.disabled = !step;
+    if (step) {
       input.addEventListener('change', () => {
         const v = parseFloat(input.value);
         if (!isNaN(v) && v >= 0 && v <= 1) {
@@ -815,33 +896,39 @@ export class UI {
           this._update();
         }
       });
+    }
 
-      const upBtn = document.createElement('button');
-      upBtn.className = 'task-spinner-btn';
-      upBtn.textContent = '\u25B2';
+    const upBtn = document.createElement('button');
+    upBtn.className = 'task-spinner-btn';
+    upBtn.textContent = '\u25B2';
+    upBtn.disabled = !step;
+    if (step) {
       upBtn.addEventListener('click', () => {
         step.progress = Math.min(1, Math.round((step.progress + increment) * 1000) / 1000);
         this._syncTaskRow();
         this._update();
       });
+    }
 
-      const downBtn = document.createElement('button');
-      downBtn.className = 'task-spinner-btn';
-      downBtn.textContent = '\u25BC';
+    const downBtn = document.createElement('button');
+    downBtn.className = 'task-spinner-btn';
+    downBtn.textContent = '\u25BC';
+    downBtn.disabled = !step;
+    if (step) {
       downBtn.addEventListener('click', () => {
         step.progress = Math.max(0, Math.round((step.progress - increment) * 1000) / 1000);
         this._syncTaskRow();
         this._update();
       });
-
-      const spinnerDiv = document.createElement('span');
-      spinnerDiv.className = 'task-spinner';
-      spinnerDiv.appendChild(upBtn);
-      spinnerDiv.appendChild(downBtn);
-
-      valSpan.appendChild(input);
-      valSpan.appendChild(spinnerDiv);
     }
+
+    const spinnerDiv = document.createElement('span');
+    spinnerDiv.className = 'task-spinner';
+    spinnerDiv.appendChild(upBtn);
+    spinnerDiv.appendChild(downBtn);
+
+    valSpan.appendChild(input);
+    valSpan.appendChild(spinnerDiv);
   }
 
   _makeCrewBox(routeId, memberId, memberColor, isStatic) {
@@ -856,6 +943,113 @@ export class UI {
     const m = CREW_MEMBERS[memberId];
     if (!m) return 'yellow';
     return m.livery === 'brown' ? 'brown' : 'yellow';
+  }
+
+  // ── Assign mode (right-click handoff box → pick crew on canvas) ────────
+
+  _enterAssignMode(stepIdx, isBrown) {
+    this._assignMode = true;
+    this._assignStepIdx = stepIdx;
+    this._assignIsBrown = isBrown;
+    this.canvas.style.cursor = 'crosshair';
+    this._syncTaskRow();
+  }
+
+  _exitAssignMode() {
+    this._assignMode = false;
+    this._assignStepIdx = -1;
+    this._assignIsBrown = false;
+    this.canvas.style.cursor = '';
+    this._syncTaskRow();
+  }
+
+  /** Handle canvas click while in assign mode. Returns true if handled. */
+  _handleAssignClick(w) {
+    if (!this._assignMode) return false;
+
+    const hit = this._crewHitTest(w);
+    if (hit.idx < 0) {
+      // Clicked empty space → cancel
+      this._exitAssignMode();
+      return true;
+    }
+
+    const task = this._currentTask();
+    if (!task) { this._exitAssignMode(); return true; }
+
+    const isTakeoff = this.rs.selectedRouteType === 'takeoff';
+
+    if (this._assignIsBrown) {
+      // Assigning brown crew
+      if (hit.type === 'idle') {
+        task.brownId = hit.idx;
+        task.brownRouteId = -1;
+      } else {
+        // Active route
+        task.brownRouteId = hit.idx;
+      }
+    } else {
+      // Assigning a step
+      const step = task.steps[this._assignStepIdx];
+      if (!step) { this._exitAssignMode(); return true; }
+      if (hit.type === 'idle') {
+        step.memberId = hit.idx;
+        step.routeId = -1;
+      } else {
+        // Active route
+        step.routeId = hit.idx;
+      }
+    }
+
+    this._exitAssignMode();
+    this._update();
+    return true;
+  }
+
+  // ── Add / Delete task steps ────────────────────────────────────────────
+
+  _addTaskStep() {
+    const task = this._currentTask();
+    if (!task) return;
+    const steps = task.steps;
+
+    // Place new step at midpoint of largest gap, or at 0.5 if empty
+    let newProgress = 0.5;
+    if (steps.length > 0) {
+      // Find largest gap between existing steps (including 0 and 1 boundaries)
+      const sorted = steps.map(s => s.progress).sort((a, b) => a - b);
+      const boundaries = [0, ...sorted, 1];
+      let bestGap = 0, bestMid = 0.5;
+      for (let i = 1; i < boundaries.length; i++) {
+        const gap = boundaries[i] - boundaries[i - 1];
+        if (gap > bestGap) { bestGap = gap; bestMid = (boundaries[i - 1] + boundaries[i]) / 2; }
+      }
+      newProgress = Math.round(bestMid * 1000) / 1000;
+    }
+
+    // Default to first available member (memberId 0) and no route
+    const newStep = { progress: newProgress, memberId: 0, routeId: -1 };
+    steps.push(newStep);
+    // Keep steps sorted by progress
+    steps.sort((a, b) => a.progress - b.progress);
+
+    // Select the new step
+    this._selectedHandoff = steps.indexOf(newStep);
+    this._syncTaskRow();
+    this._update();
+  }
+
+  _deleteTaskStep() {
+    const task = this._currentTask();
+    if (!task || this._selectedHandoff < 0 || this._selectedHandoff >= task.steps.length) return;
+
+    task.steps.splice(this._selectedHandoff, 1);
+    // Adjust selection
+    if (this._selectedHandoff >= task.steps.length) {
+      this._selectedHandoff = task.steps.length - 1;
+    }
+    this._syncTaskRow();
+    this._update();
   }
 
   /** Nudge overlapping positions so boxes don't stack. Returns adjusted 0-1 values for display. */
@@ -1008,6 +1202,13 @@ export class UI {
   }
 
   _onPointerDown(e) {
+    // Assign mode: left-click picks crew or cancels
+    if (this._assignMode && e.button === 0) {
+      const w = this._canvasWorld(e);
+      this._handleAssignClick(w);
+      return;
+    }
+
     if (this._isPanButton(e)) {
       this._panning = true;
       this._panLast = this._canvasWorld(e);
@@ -1119,6 +1320,11 @@ export class UI {
         this.rs.selectRoute(routeHit.type, routeHit.idx);
         this.renderList();
         return;
+      }
+      // Miss everything in route edit — deselect handoff if task edit active
+      if (this._taskEditActive && this._selectedHandoff >= 0) {
+        this._selectedHandoff = -1;
+        this._syncTaskRow();
       }
     }
 

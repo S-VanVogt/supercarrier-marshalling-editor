@@ -1,3 +1,9 @@
+<!--
+  SuperCarrier Marshalling Editor — Version History
+  v0.1.15 — Task edit UI: handoff boxes, vertex ticks, orange/gray crew lines,
+             right-click assign mode, add/delete steps, cat selector, Related filter,
+             click-to-deselect, brown box at t=0, stable value display
+-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -33,6 +39,10 @@
         <div class="task-right-group">
           <span class="task-right-spacer"></span>
           <span class="task-handoff-val" id="task-handoff-val"></span>
+          <span class="task-action-group" id="task-action-group">
+            <button class="task-action-btn" id="btn-task-add" title="Add step">+</button>
+            <button class="task-action-btn" id="btn-task-delete" title="Delete selected step">&minus;</button>
+          </span>
           <button class="route-edit-btn" id="btn-edit-task">Edit Task</button>
         </div>
       </div>
@@ -97,6 +107,7 @@
       <div class="panel-col">
         <div class="col-header">
           <span class="col-title">Active Positions (routes)</span>
+          <button class="col-filter-btn" id="crew-active-filter" title="Show only routes used by selected idle member">Related</button>
           <label class="col-show-all"><span>Show all</span><input type="checkbox" id="crew-active-global" checked></label>
         </div>
         <div class="route-list" id="crew-active-list"></div>

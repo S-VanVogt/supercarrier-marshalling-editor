@@ -1092,13 +1092,21 @@ export class Renderer {
   // ── Active crew connection line (progress-based) ───────────────────────────
 
   /** Resolve a crew route/member to a world-space {x, y} target. */
-  _crewTarget(routeId) {
-    const crewRoute = CREW_ROUTES[routeId];
-    if (!crewRoute) return null;
-    const pos = crewRoute.points
-      ? crewRoute.points[crewRoute.points.length - 1]
-      : crewRoute;
-    return { x: pos.x, y: pos.y };
+  _crewTarget(routeId, memberId) {
+    if (routeId >= 0) {
+      const crewRoute = CREW_ROUTES[routeId];
+      if (!crewRoute) return null;
+      const pos = crewRoute.points
+        ? crewRoute.points[crewRoute.points.length - 1]
+        : crewRoute;
+      return { x: pos.x, y: pos.y };
+    }
+    // routeId -1: use member's idle position
+    if (memberId != null) {
+      const member = CREW_MEMBERS[memberId];
+      if (member) return { x: member.x, y: member.y };
+    }
+    return null;
   }
 
   /** Find the controlling step index at progress t (-1 = brown, null = catapult). */
@@ -1132,7 +1140,7 @@ export class Renderer {
       for (let i = 0; i < task.steps.length; i++) {
         if (i === controllingIdx) continue; // drawn as orange below
         const step = task.steps[i];
-        const target = this._crewTarget(step.routeId);
+        const target = this._crewTarget(step.routeId, step.memberId);
         if (!target) continue;
         // Initial position: where this step receives control
         const initT = (i === 0) ? 0 : task.steps[i - 1].progress;
@@ -1149,7 +1157,7 @@ export class Renderer {
       }
       // Brown line (from route start to brown crew position)
       if (controllingIdx !== -1 && task.brownRouteId != null) {
-        const target = this._crewTarget(task.brownRouteId);
+        const target = this._crewTarget(task.brownRouteId, task.brownId);
         if (target) {
           const startPt = polylinePoint(route.points, 0);
           if (startPt) {
@@ -1174,9 +1182,10 @@ export class Renderer {
     let target = null;
     if (controllingIdx === -1) {
       // Brown is controlling
-      target = this._crewTarget(task.brownRouteId);
+      target = this._crewTarget(task.brownRouteId, task.brownId);
     } else if (controllingIdx !== null) {
-      target = this._crewTarget(task.steps[controllingIdx].routeId);
+      const cs = task.steps[controllingIdx];
+      target = this._crewTarget(cs.routeId, cs.memberId);
     } else {
       // Past last step → catapult
       const cat = Renderer.CATAPULTS[route.runwayIdx - 1];
@@ -1200,12 +1209,7 @@ export class Renderer {
 
   /** Resolve a parking step's target position (handles routeId -1 → idle). */
   _parkingTarget(step) {
-    if (step.routeId >= 0) {
-      return this._crewTarget(step.routeId);
-    }
-    // routeId -1: member at idle position
-    const member = CREW_MEMBERS[step.memberId];
-    return member ? { x: member.x, y: member.y } : null;
+    return this._crewTarget(step.routeId, step.memberId);
   }
 
   /** Find controlling step index for parking task at progress t.
