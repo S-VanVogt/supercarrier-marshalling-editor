@@ -833,6 +833,15 @@ export class UI {
       if (catCrewData.length > 0) {
         replaceCatapultCrews(catCrewData);
         this.rs.refreshCatCrewSnapshots();
+        // Detect hidden cats by checking h values on route points
+        for (let ci = 0; ci < catCrewData.length && ci < 4; ci++) {
+          const crew = catCrewData[ci];
+          const hasSeaLevel = crew.members.some(m =>
+            m.routes.some(r => r.points.some(p => p.h != null && p.h < 1))
+          );
+          this._catCrewHidden[ci] = hasSeaLevel;
+        }
+        this._syncCatCrewPanel();
         this._rebuildCatCrewList();
         console.log(`Imported catapult crew: ${catCrewData.length} catapults`);
       }
@@ -2303,6 +2312,14 @@ export class UI {
     document.querySelectorAll('.phase-btn').forEach(btn => {
       btn.classList.toggle('active', parseInt(btn.dataset.phase) === this.rs.catCrewPhase);
     });
+    // Warning if any visible route leads to a hidden catapult
+    const warn = document.getElementById('catcrew-warning');
+    if (warn) {
+      const hasConflict = this.rs.takeoffRoutes.some((r, i) =>
+        this.rs.takeoffRouteVisible[i] && this._catCrewHidden[r.runwayIdx - 1]
+      );
+      warn.style.display = hasConflict ? '' : 'none';
+    }
   }
 
   /** Toggle all h values for a catapult's crew between deck height and sea level. */

@@ -895,6 +895,7 @@ button:hover { background: #f1efe8; }
 }
 .cat-hide-btn:hover { background: #f0efeb; }
 .cat-hide-btn.active { background: #f8d7da; color: #721c24; border-color: #d4a0a6; }
+.catcrew-warning { font-size: 11px; color: #c0392b; padding: 3px 6px; width: 100%; }
 .cat-slider-row {
   display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 11px; color: #5f5e5a;
 }
