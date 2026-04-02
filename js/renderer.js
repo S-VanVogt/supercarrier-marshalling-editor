@@ -1247,27 +1247,34 @@ export class Renderer {
     // Circles around crew targets in task edit mode
     if (taskEdit) {
       const selIdx = (rs.selectedHandoff != null) ? rs.selectedHandoff : -1;
+      // Also highlight the assign-mode step with blue
+      const assignIdx = rs.assignMode ? rs.assignStepIdx : -999;
+      const assignBrown = rs.assignMode && rs.assignIsBrown;
       const circleR = 12;
 
-      // Gray circles on unselected steps + brown
-      const drawCircle = (tgt, isSelected) => {
+      const isBlue = (stepIdx, isBrown) => {
+        if (isBrown) return assignBrown;
+        return stepIdx === selIdx || stepIdx === assignIdx;
+      };
+
+      const drawCircle = (tgt, blue) => {
         if (!tgt) return;
         const c = this.wc(tgt.x, tgt.y);
         ctx.beginPath();
         ctx.arc(c.x, c.y, circleR, 0, Math.PI * 2);
-        ctx.strokeStyle = isSelected ? 'rgba(60,130,240,0.9)' : 'rgba(150,150,150,0.5)';
-        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        ctx.strokeStyle = blue ? 'rgba(60,130,240,0.9)' : 'rgba(150,150,150,0.5)';
+        ctx.lineWidth = blue ? 2.5 : 1.5;
         ctx.stroke();
       };
 
-      // Brown crew circle (never "selected" via selectedHandoff)
+      // Brown crew circle
       if (task.brownId != null) {
-        drawCircle(this._crewTarget(task.brownRouteId, task.brownId), false);
+        drawCircle(this._crewTarget(task.brownRouteId, task.brownId), isBlue(-1, true));
       }
       // Step crew circles
       for (let i = 0; i < task.steps.length; i++) {
         const step = task.steps[i];
-        drawCircle(this._crewTarget(step.routeId, step.memberId), i === selIdx);
+        drawCircle(this._crewTarget(step.routeId, step.memberId), isBlue(i, false));
       }
     }
 
