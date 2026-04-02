@@ -888,6 +888,13 @@ button:hover { background: #f1efe8; }
 .cat-btn:hover, .phase-btn:hover { background: #f0efeb; }
 .cat-btn.active { background: #1a1a18; color: #fff; border-color: #1a1a18; }
 .phase-btn.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.cat-group { display: flex; flex: 1; flex-direction: column; gap: 2px; }
+.cat-hide-btn {
+  font-size: 9px; padding: 1px 0; border: 0.5px solid #d3d1c7; border-radius: 4px;
+  background: #fff; color: #999; cursor: pointer; text-align: center; transition: background 0.15s;
+}
+.cat-hide-btn:hover { background: #f0efeb; }
+.cat-hide-btn.active { background: #f8d7da; color: #721c24; border-color: #d4a0a6; }
 .cat-slider-row {
   display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 11px; color: #5f5e5a;
 }

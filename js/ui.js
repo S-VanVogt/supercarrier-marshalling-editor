@@ -47,6 +47,9 @@ export class UI {
     this._assignStepIdx = -1;   // step index being assigned
     this._assignIsBrown = false; // true if assigning the brown crew
 
+    // Catapult crew hide state (per cat, sets h to 0.0123 to sink crew below deck)
+    this._catCrewHidden = [false, false, false, false];
+
     this._bindEvents();
     this._buildRoutePanels();
     this._buildBlockerGrid();
@@ -449,6 +452,17 @@ export class UI {
         this.rs.setCatCrewCatapult(parseInt(btn.dataset.cat));
         this._syncCatCrewPanel();
         this._rebuildCatCrewList();
+      });
+    });
+
+    document.querySelectorAll('.cat-hide-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const catIdx = parseInt(btn.dataset.cat);
+        this._catCrewHidden[catIdx] = !this._catCrewHidden[catIdx];
+        this._applyCatCrewHide(catIdx);
+        this._syncCatCrewPanel();
+        this._rebuildCatCrewList();
+        this._update();
       });
     });
 
@@ -2281,9 +2295,35 @@ export class UI {
     document.querySelectorAll('.cat-btn').forEach(btn => {
       btn.classList.toggle('active', parseInt(btn.dataset.cat) === this.rs.catCrewCatapult);
     });
+    document.querySelectorAll('.cat-hide-btn').forEach(btn => {
+      const catIdx = parseInt(btn.dataset.cat);
+      btn.classList.toggle('active', this._catCrewHidden[catIdx]);
+      btn.textContent = this._catCrewHidden[catIdx] ? 'hidden' : 'hide';
+    });
     document.querySelectorAll('.phase-btn').forEach(btn => {
       btn.classList.toggle('active', parseInt(btn.dataset.phase) === this.rs.catCrewPhase);
     });
+  }
+
+  /** Toggle all h values for a catapult's crew between deck height and sea level. */
+  _applyCatCrewHide(catIdx) {
+    const DECK_H = 20.1494140625;
+    const SEA_H = 0.0123;
+    const hidden = this._catCrewHidden[catIdx];
+    const h = hidden ? SEA_H : DECK_H;
+    const crew = CATAPULT_CREWS[catIdx];
+    if (!crew) return;
+    for (const member of crew.members) {
+      // Position and fast start position
+      member.position.h = h;
+      if (member.fastStartPosition) member.fastStartPosition.h = h;
+      // All route points
+      for (const route of member.routes) {
+        for (const pt of route.points) {
+          pt.h = h;
+        }
+      }
+    }
   }
 
   _rebuildCatCrewList() {

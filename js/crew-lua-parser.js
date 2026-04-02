@@ -319,12 +319,12 @@ export function parseCatapultCrew(lua) {
       // Position: {[1]=x, [2]=deckHeight, [3]=z, [4]=hdg}
       const posBlock = extractSection(mBlock, '["position"]');
       const posNums = posBlock ? extractNumberArray(posBlock) : [0, 0, 0, 0];
-      const position = { x: posNums[0], y: posNums[2], hdg: posNums[3] || 0 };
+      const position = { x: posNums[0], h: posNums[1] != null ? posNums[1] : 20.1494140625, y: posNums[2], hdg: posNums[3] || 0 };
 
       // Fast start position
       const fspBlock = extractSection(mBlock, '["fast_start_position"]');
       const fspNums = fspBlock ? extractNumberArray(fspBlock) : null;
-      const fastStartPosition = fspNums ? { x: fspNums[0], y: fspNums[2], hdg: fspNums[3] || 0 } : null;
+      const fastStartPosition = fspNums ? { x: fspNums[0], h: fspNums[1] != null ? fspNums[1] : 20.1494140625, y: fspNums[2], hdg: fspNums[3] || 0 } : null;
 
       // Angles
       const anglesBlock = extractSection(mBlock, '["angles"]');

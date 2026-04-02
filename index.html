@@ -20,13 +20,14 @@
   v0.1.41 — Compact route rows, cat selector alignment fix
   v0.1.42 — Mobile touch support, responsive canvas height
   v0.1.43 — High-DPI canvas rendering for sharp display on iPad/mobile
+  v0.1.44 — Cat crew hide button: sets h to 0.0123 per catapult to sink crew below deck
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.43</title>
+  <title>SuperCarrier Marshalling Editor v0.1.44</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -34,7 +35,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.43</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.44</h1>
       <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
     <canvas id="c" height="475"></canvas>
@@ -199,10 +200,10 @@
   <div class="tab-pane" id="panel-catapult-crew">
     <div class="panel-body">
       <div class="cat-selector">
-        <button class="cat-btn active" data-cat="0">Cat 1</button>
-        <button class="cat-btn" data-cat="1">Cat 2</button>
-        <button class="cat-btn" data-cat="2">Cat 3</button>
-        <button class="cat-btn" data-cat="3">Cat 4</button>
+        <span class="cat-group"><button class="cat-btn active" data-cat="0">Cat 1</button><button class="cat-hide-btn" data-cat="0">hide</button></span>
+        <span class="cat-group"><button class="cat-btn" data-cat="1">Cat 2</button><button class="cat-hide-btn" data-cat="1">hide</button></span>
+        <span class="cat-group"><button class="cat-btn" data-cat="2">Cat 3</button><button class="cat-hide-btn" data-cat="2">hide</button></span>
+        <span class="cat-group"><button class="cat-btn" data-cat="3">Cat 4</button><button class="cat-hide-btn" data-cat="3">hide</button></span>
       </div>
       <div class="phase-selector">
         <button class="phase-btn" data-phase="0">Idle</button>

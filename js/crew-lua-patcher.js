@@ -316,11 +316,75 @@ function isCatRouteModified(orig, curr) {
  * Patch catapult crew route points into crew.lua text.
  * Only patches routes that were actually modified (compared to originalCatCrews snapshot).
  */
-export function patchCatCrewLua(lua, catapultCrews, originalCatCrews) {
-  const blocks = findCatCrewRoutePointsBlocks(lua);
-  if (blocks.length === 0) return lua;
+/**
+ * Find catapult crew position blocks (["position"] and ["fast_start_position"])
+ * within the ["crew"] section. Returns array of { catIdx, memberIdx, key, blockStart, blockEnd }.
+ */
+function findCatCrewPositionBlocks(lua) {
+  const crewKey = '["crew"]';
+  const crewIdx = lua.indexOf(crewKey);
+  if (crewIdx < 0) return [];
+  const crewOpen = lua.indexOf('{', crewIdx + crewKey.length);
+  if (crewOpen < 0) return [];
+  const crewClose = findMatchingBrace(lua, crewOpen);
 
+  const blocks = [];
+  const crewSection = lua.slice(crewOpen, crewClose + 1);
+  const catRe = /\[(\d+)\]\s*=\s*\{/g;
+  let catMatch;
+  while ((catMatch = catRe.exec(crewSection)) !== null) {
+    const catLuaIdx = parseInt(catMatch[1]);
+    const catBraceStart = crewOpen + catMatch.index + catMatch[0].length - 1;
+    const catBraceEnd = findMatchingBrace(lua, catBraceStart);
+    if (catBraceEnd < 0) continue;
+
+    const catContent = lua.slice(catBraceStart, catBraceEnd + 1);
+    const membersKeyIdx = catContent.indexOf('["members"]');
+    if (membersKeyIdx < 0) continue;
+    const membersOpen = catContent.indexOf('{', membersKeyIdx + 11);
+    if (membersOpen < 0) continue;
+    const absMembersOpen = catBraceStart + membersOpen;
+    const absMembersClose = findMatchingBrace(lua, absMembersOpen);
+
+    const membersSection = lua.slice(absMembersOpen, absMembersClose + 1);
+    const memRe = /\[(\d+)\]\s*=\s*\{/g;
+    let memMatch;
+    while ((memMatch = memRe.exec(membersSection)) !== null) {
+      const memLuaIdx = parseInt(memMatch[1]);
+      const memBraceStart = absMembersOpen + memMatch.index + memMatch[0].length - 1;
+      const memBraceEnd = findMatchingBrace(lua, memBraceStart);
+      if (memBraceEnd < 0) continue;
+
+      const memContent = lua.slice(memBraceStart, memBraceEnd + 1);
+      for (const key of ['["position"]', '["fast_start_position"]']) {
+        const keyIdx = memContent.indexOf(key);
+        if (keyIdx < 0) continue;
+        const bOpen = memContent.indexOf('{', keyIdx + key.length);
+        if (bOpen < 0) continue;
+        const absBOpen = memBraceStart + bOpen;
+        const absBClose = findMatchingBrace(lua, absBOpen);
+        if (absBClose < 0) continue;
+        blocks.push({
+          catIdx: catLuaIdx - 1,
+          memberIdx: memLuaIdx - 1,
+          key,
+          blockStart: absBOpen + 1,
+          blockEnd: absBClose,
+        });
+      }
+
+      memRe.lastIndex = memBraceStart + (memBraceEnd - memBraceStart) + 1 - absMembersOpen;
+    }
+    catRe.lastIndex = catBraceStart + (catBraceEnd - catBraceStart) + 1 - crewOpen;
+  }
+  return blocks;
+}
+
+export function patchCatCrewLua(lua, catapultCrews, originalCatCrews) {
   const patches = [];
+
+  // Patch route points
+  const blocks = findCatCrewRoutePointsBlocks(lua);
   for (const block of blocks) {
     const crew = catapultCrews[block.catIdx];
     if (!crew) continue;
@@ -329,18 +393,43 @@ export function patchCatCrewLua(lua, catapultCrews, originalCatCrews) {
     const route = member.routes[block.routeIdx];
     if (!route) continue;
 
-    // Only patch if modified from original
     const origCrew = originalCatCrews?.[block.catIdx];
     const origMember = origCrew?.members[block.memberIdx];
     const origRoute = origMember?.routes[block.routeIdx];
     if (origRoute && !isCatRouteModified(origRoute, route)) continue;
 
     const replacement = buildCatCrewRoutePoints(route.points);
-    patches.push({
-      start: block.ptsStart,
-      end: block.ptsEnd,
-      replacement,
-    });
+    patches.push({ start: block.ptsStart, end: block.ptsEnd, replacement });
+  }
+
+  // Patch position and fast_start_position heights
+  const posBlocks = findCatCrewPositionBlocks(lua);
+  for (const pb of posBlocks) {
+    const crew = catapultCrews[pb.catIdx];
+    if (!crew) continue;
+    const member = crew.members[pb.memberIdx];
+    if (!member) continue;
+
+    const isFsp = pb.key === '["fast_start_position"]';
+    const pos = isFsp ? member.fastStartPosition : member.position;
+    if (!pos || pos.h == null) continue;
+
+    // Check if height changed from original
+    const origCrew = originalCatCrews?.[pb.catIdx];
+    const origMember = origCrew?.members[pb.memberIdx];
+    const origPos = isFsp ? origMember?.fastStartPosition : origMember?.position;
+    const origH = origPos?.h != null ? origPos.h : 20.1494140625;
+    if (Math.abs(pos.h - origH) < 0.0001) continue;
+
+    // Replace [2] = NUMBER inside the position block
+    const content = lua.slice(pb.blockStart, pb.blockEnd);
+    const replaced = content.replace(
+      /(\[2\]\s*=\s*)[0-9]+(?:\.[0-9]+)?/,
+      '$1' + pos.h
+    );
+    if (replaced !== content) {
+      patches.push({ start: pb.blockStart, end: pb.blockEnd, replacement: replaced });
+    }
   }
 
   if (patches.length === 0) return lua;
