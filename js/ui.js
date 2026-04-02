@@ -2256,9 +2256,14 @@ export class UI {
 
   _resize() {
     const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = Math.min(rect.width, 2048);
-    if (!this._canvasHeight) this._canvasHeight = 475;
+    // On small screens, cap canvas height to 40% of viewport height
+    if (!this._canvasHeight) {
+      const vh = window.innerHeight;
+      this._canvasHeight = vh < 700 ? Math.round(vh * 0.4) : 475;
+    }
+    this.canvas.width = Math.round(rect.width);
     this.canvas.height = this._canvasHeight;
+    this.canvas.style.height = this._canvasHeight + 'px';
     this.viewport.equalizeScale(this.canvas.width, this.canvas.height);
     this._update();
   }
