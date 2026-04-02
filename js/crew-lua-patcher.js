@@ -307,7 +307,7 @@ function isCatRouteModified(orig, curr) {
   if (!orig || !curr) return true;
   if (orig.points.length !== curr.points.length) return true;
   return orig.points.some((p, j) =>
-    p.x !== curr.points[j].x || p.y !== curr.points[j].y ||
+    p.x !== curr.points[j].x || p.y !== curr.points[j].y || p.h !== curr.points[j].h ||
     p.vx !== curr.points[j].vx || p.vy !== curr.points[j].vy || p.vz !== curr.points[j].vz
   );
 }
