@@ -29,8 +29,9 @@ export class Renderer {
     this._f14CenterY = 635;              // SVG centerline Y
   }
 
-  get W() { return this.canvas.width; }
-  get H() { return this.canvas.height; }
+  /** CSS pixel dimensions (canvas buffer may be larger on high-DPI). */
+  get W() { return this.canvas.width / (this.dpr || 1); }
+  get H() { return this.canvas.height / (this.dpr || 1); }
 
   /** Shorthand for viewport.toCanvas bound to current canvas size. */
   wc(wx, wy) { return this.viewport.toCanvas(wx, wy, this.W, this.H); }
@@ -1362,6 +1363,8 @@ export class Renderer {
 
   // ── Full frame ────────────────────────────────────────────────────────────
   render(routeState) {
+    const dpr = this.dpr || 1;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.ctx.clearRect(0, 0, this.W, this.H);
     this.drawGrid();
     this.drawPolygon();

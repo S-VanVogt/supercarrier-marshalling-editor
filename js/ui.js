@@ -1457,9 +1457,10 @@ export class UI {
     );
   }
 
-  /** Hit-test radius in world units (~ 8 px). */
+  /** Hit-test radius in world units (~ 8 CSS px). */
   _hitRadius() {
-    return (this.viewport.width / this.canvas.width) * 8;
+    const dpr = window.devicePixelRatio || 1;
+    return (this.viewport.width / (this.canvas.width / dpr)) * 8;
   }
 
   /** Custom cursor: crosshair with circle, cached as data URI. */
@@ -2256,15 +2257,21 @@ export class UI {
 
   _resize() {
     const rect = this.canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
     // On small screens, cap canvas height to 40% of viewport height
     if (!this._canvasHeight) {
       const vh = window.innerHeight;
       this._canvasHeight = vh < 700 ? Math.round(vh * 0.4) : 475;
     }
-    this.canvas.width = Math.round(rect.width);
-    this.canvas.height = this._canvasHeight;
-    this.canvas.style.height = this._canvasHeight + 'px';
-    this.viewport.equalizeScale(this.canvas.width, this.canvas.height);
+    const cssW = Math.round(rect.width);
+    const cssH = this._canvasHeight;
+    // Buffer is dpr-scaled for sharp rendering on high-DPI screens
+    this.canvas.width = Math.round(cssW * dpr);
+    this.canvas.height = Math.round(cssH * dpr);
+    this.canvas.style.height = cssH + 'px';
+    // Tell renderer the dpr so it draws in CSS pixel space
+    this.renderer.dpr = dpr;
+    this.viewport.equalizeScale(cssW, cssH);
     this._update();
   }
 
