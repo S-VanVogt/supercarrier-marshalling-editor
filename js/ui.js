@@ -881,6 +881,7 @@ export class UI {
     // Toggle button active state
     btn.classList.toggle('active', this._taskEditActive);
     this.rs.taskEditActive = this._taskEditActive;
+    this.rs.selectedHandoff = this._selectedHandoff;
 
     // Show/hide task content (not the button) — use visibility to preserve layout
     const showContent = this._taskEditActive && task;
@@ -1861,8 +1862,8 @@ export class UI {
     if (!route) return;
 
     const isTakeoff = type === 'takeoff';
-    const extraLabel = isTakeoff ? '⌀' : 'desp';
-    header.innerHTML = `<span>#</span><span>x</span><span>y</span><span>v</span><span>${extraLabel}</span><span></span>`;
+    const extraLabel = isTakeoff ? 'sp ⌀' : 'desp';
+    header.innerHTML = `<span>#</span><span>x</span><span>y</span><span>vel</span><span>${extraLabel}</span><span></span>`;
     header.style.gridTemplateColumns = '28px 1fr 1fr 60px 52px 28px';
 
     points.forEach((p, i) => {
@@ -1936,12 +1937,16 @@ export class UI {
     this.slider.value = Math.round(this.rs.t * 100);
     this.renderer.render(this.rs);
 
-    // Update coord display from route marker
+    // Update progress label and coord display from route marker
+    const pLabel = document.getElementById('progress-label');
     const route = this.rs.getSelectedRoute();
+    if (pLabel) {
+      pLabel.textContent = route ? `Route ${this.rs.selectedRoute + 1}:` : 'Progress:';
+    }
     if (route) {
       const rpt = polylinePoint(route.points, this.rs.t);
       if (rpt) {
-        this.coordout.textContent = `x: ${rpt.x.toFixed(2)}, y: ${rpt.y.toFixed(2)}, v: ${rpt.v.toFixed(2)}`;
+        this.coordout.textContent = `x: ${rpt.x.toFixed(2)} y: ${rpt.y.toFixed(2)} v: ${rpt.v.toFixed(2)}`;
       }
     } else {
       this.coordout.textContent = 'x: \u2014, y: \u2014';
@@ -2013,7 +2018,7 @@ export class UI {
   _resize() {
     const rect = this.canvas.getBoundingClientRect();
     this.canvas.width = Math.min(rect.width, 2048);
-    if (!this._canvasHeight) this._canvasHeight = 750;
+    if (!this._canvasHeight) this._canvasHeight = 475;
     this.canvas.height = this._canvasHeight;
     this.viewport.equalizeScale(this.canvas.width, this.canvas.height);
     this._update();

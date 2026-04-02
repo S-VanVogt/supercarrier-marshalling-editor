@@ -13,3 +13,15 @@ const ui       = new UI(viewport, renderer, routeState);
 
 ui.boot();
 window.__vp = viewport;
+
+// Tab switching
+document.getElementById('tab-bar').addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab-btn');
+  if (!btn) return;
+  const tabId = btn.dataset.tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  const pane = document.getElementById(tabId);
+  if (pane) pane.classList.add('active');
+});

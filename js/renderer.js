@@ -1244,6 +1244,33 @@ export class Renderer {
       ctx.stroke();
     }
 
+    // Circles around crew targets in task edit mode
+    if (taskEdit) {
+      const selIdx = (rs.selectedHandoff != null) ? rs.selectedHandoff : -1;
+      const circleR = 12;
+
+      // Gray circles on unselected steps + brown
+      const drawCircle = (tgt, isSelected) => {
+        if (!tgt) return;
+        const c = this.wc(tgt.x, tgt.y);
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, circleR, 0, Math.PI * 2);
+        ctx.strokeStyle = isSelected ? 'rgba(60,130,240,0.9)' : 'rgba(150,150,150,0.5)';
+        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        ctx.stroke();
+      };
+
+      // Brown crew circle (never "selected" via selectedHandoff)
+      if (task.brownId != null) {
+        drawCircle(this._crewTarget(task.brownRouteId, task.brownId), false);
+      }
+      // Step crew circles
+      for (let i = 0; i < task.steps.length; i++) {
+        const step = task.steps[i];
+        drawCircle(this._crewTarget(step.routeId, step.memberId), i === selIdx);
+      }
+    }
+
     ctx.restore();
   }
 

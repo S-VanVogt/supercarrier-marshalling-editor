@@ -13,13 +13,15 @@
   v0.1.25 — Fix handoff drag: re-sort steps by progress during drag so controlling step and gray lines update correctly
   v0.1.25 — Export RunwayIdx changes + takeoff task edits (progress, members, steps) to Lua files
   v0.1.26 — Task add/del buttons: smaller, non-bold text matching number style
+  v0.1.27 — Blue/gray crew circles in task edit, canvas default 475px
+  v0.1.28 — Panels converted to tabs (Routes, Crew, Catapult Crew, Config)
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.26</title>
+  <title>SuperCarrier Marshalling Editor v0.1.28</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -27,11 +29,11 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.26</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.28</h1>
+      <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
-    <canvas id="c" height="750"></canvas>
+    <canvas id="c" height="475"></canvas>
     <div class="canvas-resize-handle" id="canvas-resize-handle"></div>
-    <p class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</p>
     <div class="progress-area" id="progress-bar">
       <div class="vertex-tick-row" id="vertex-tick-row">
         <div class="vertex-tick-spacer"></div>
@@ -39,7 +41,7 @@
         <div class="vertex-tick-right-spacer"></div>
       </div>
       <div class="progress-row">
-        <span class="progress-label">Progress:</span>
+        <span class="progress-label" id="progress-label">Progress:</span>
         <input type="range" min="0" max="100" value="0" id="tslider">
         <div class="progress-right">
           <span id="tval" style="min-width:32px">0.00</span>
@@ -67,12 +69,21 @@
     </div>
   </div>
 
-  <!-- Scrollable panels -->
+  <!-- Tab panels -->
   <div class="panels-scroll">
+  <div class="tab-bar" id="tab-bar">
+    <button class="tab-btn active" data-tab="panel-routes">Routes</button>
+    <button class="tab-btn" data-tab="panel-crew">Crew</button>
+    <button class="tab-btn" data-tab="panel-catapult-crew">Catapult Crew
+      <label class="tab-check" onclick="event.stopPropagation()">
+        <input type="checkbox" id="chk-catcrew-visible">
+      </label>
+    </button>
+    <button class="tab-btn" data-tab="panel-config">Config</button>
+  </div>
 
   <!-- Routes: 3-column (Takeoff | Landing | Points) -->
-  <details class="panel" id="panel-routes" open>
-    <summary>Routes</summary>
+  <div class="tab-pane active" id="panel-routes">
     <div class="panels-columns cols-3">
       <div class="panel-col">
         <div class="col-header">
@@ -95,7 +106,7 @@
           <div class="col-header">
             <span class="col-title" id="pt-list-title">Points</span>
           </div>
-          <div class="pt-header"><span>#</span><span>x</span><span>y</span><span>v</span><span></span></div>
+          <div class="pt-header"><span>#</span><span>x</span><span>y</span><span>vel</span><span></span></div>
           <div id="pt-rows"></div>
           <div class="add-row">
             <label>Add:</label>
@@ -155,11 +166,10 @@
       </div>
       </div>
     </div>
-  </details>
+  </div>
 
   <!-- Crew: 2-column (Idle | Active) -->
-  <details class="panel" id="panel-crew">
-    <summary>Deck Marshalling Crew</summary>
+  <div class="tab-pane" id="panel-crew">
     <div class="panels-columns cols-2">
       <div class="panel-col">
         <div class="col-header">
@@ -177,16 +187,10 @@
         <div class="route-list" id="crew-active-list"></div>
       </div>
     </div>
-  </details>
+  </div>
 
   <!-- Catapult Crew -->
-  <details class="panel" id="panel-catapult-crew">
-    <summary>
-      <span>Catapult Crew</span>
-      <label class="show-all-check" style="margin-left:auto">
-        Show <input type="checkbox" id="chk-catcrew-visible">
-      </label>
-    </summary>
+  <div class="tab-pane" id="panel-catapult-crew">
     <div class="panel-body">
       <div class="cat-selector">
         <button class="cat-btn active" data-cat="0">Cat 1</button>
@@ -209,11 +213,10 @@
       </div>
       <div class="route-list" id="catcrew-member-list"></div>
     </div>
-  </details>
+  </div>
 
-  <!-- Config I/O (folder-based) -->
-  <details class="panel" id="panel-config-io" open>
-    <summary>Config I/O</summary>
+  <!-- Config (combined I/O) -->
+  <div class="tab-pane" id="panel-config">
     <div class="panel-body">
       <div class="btn-row" style="align-items:center">
         <button id="btn-import-config">Import Config</button>
@@ -231,11 +234,7 @@
         </div>
       </div>
     </div>
-  </details>
-
-  <!-- Import / Export (legacy, per-file) -->
-  <details class="panel" id="panel-lua-io">
-    <summary>Import / Export (per-file)</summary>
+    <div class="config-separator"></div>
     <div class="panel-body">
       <div class="btn-row">
         <button id="btn-import-lua">Import RunwaysAndRoutes</button>
@@ -248,7 +247,7 @@
         <input type="text" id="crew-header-comment" placeholder="Header comment for exported crew lua" style="flex:1;min-width:160px;font-size:12px;padding:4px 8px;border:0.5px solid #b4b2a9;border-radius:8px;outline:none">
       </div>
     </div>
-  </details>
+  </div>
   </div><!-- .panels-scroll -->
 </div><!-- .app-layout -->
 
