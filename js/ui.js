@@ -94,6 +94,7 @@ export class UI {
       this._selectedHandoff = -1;
       this._exitAssignMode();
       this._syncTaskRow();
+      this._update();
     });
     // Add/Delete step buttons
     document.getElementById('btn-task-add').addEventListener('click', () => this._addTaskStep());
@@ -103,6 +104,7 @@ export class UI {
       if (e.target === e.currentTarget && this._selectedHandoff >= 0) {
         this._selectedHandoff = -1;
         this._syncTaskRow();
+        this._update();
       }
     });
     // Click progress area background to deselect crew in combined mode
@@ -120,7 +122,13 @@ export class UI {
       progress = Math.max(0, Math.min(1, progress));
       const task = this._currentTask();
       if (task && task.steps[this._dragStepIdx]) {
-        task.steps[this._dragStepIdx].progress = Math.round(progress * 1000) / 1000;
+        const draggedStep = task.steps[this._dragStepIdx];
+        draggedStep.progress = Math.round(progress * 1000) / 1000;
+        // Re-sort steps by progress to keep _controllingStep correct
+        task.steps.sort((a, b) => a.progress - b.progress);
+        // Update drag index to follow the step's new position
+        this._dragStepIdx = task.steps.indexOf(draggedStep);
+        this._selectedHandoff = this._dragStepIdx;
         this._syncTaskRow();
         this._update();
       }
@@ -196,7 +204,7 @@ export class UI {
     document.getElementById('btn-export-crew').addEventListener('click', () => {
       if (!this._originalCrewLuaText) { alert('crew.lua not imported yet.'); return; }
       const headerComment = document.getElementById('crew-header-comment').value.trim();
-      downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment);
+      downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment, TAKEOFF_TASKS);
     });
 
     // ── Config I/O (folder-based) ──────────────────────────────────────
@@ -275,7 +283,7 @@ export class UI {
         downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp, this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
       }
       if (this._originalCrewLuaText) {
-        downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp);
+        downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS);
       }
       // Update loaded variant and save notes for next export
       this.rs.loadedVariant = { name, version: ver };
@@ -947,6 +955,7 @@ export class UI {
         this._dragStepIdx = si;
         e.preventDefault();
         this._syncTaskRow();
+        this._update();
       });
       // Right-click to enter assign mode
       box.addEventListener('contextmenu', (e) => {
@@ -1033,6 +1042,7 @@ export class UI {
     this._assignIsBrown = isBrown;
     this.canvas.style.cursor = 'crosshair';
     this._syncTaskRow();
+    this._update();
   }
 
   _exitAssignMode() {
@@ -1041,6 +1051,7 @@ export class UI {
     this._assignIsBrown = false;
     this.canvas.style.cursor = '';
     this._syncTaskRow();
+    this._update();
   }
 
   /** Handle canvas click while in assign mode. Returns true if handled. */
@@ -1174,7 +1185,7 @@ export class UI {
     if (rs.selectedCrewType === 'idle') {
       const m = CREW_MEMBERS[rs.selectedCrewIdx];
       if (!m) return;
-      label.textContent = `Idle #${rs.selectedCrewIdx}: ${m.name}`;
+      label.textContent = `Idle ${rs.selectedCrewIdx}: [${rs.selectedCrewIdx + 1}] ${m.name}`;
       // Only rebuild inputs if they don't already match (avoid losing focus)
       if (fieldsDiv.dataset.key !== `idle-${rs.selectedCrewIdx}`) {
         fieldsDiv.dataset.key = `idle-${rs.selectedCrewIdx}`;
@@ -1207,7 +1218,7 @@ export class UI {
       const ptIdx = rs.selectedCrewPointIdx >= 0 ? rs.selectedCrewPointIdx : 0;
       const p = pts[ptIdx];
       if (!p) return;
-      const ptLabel = pts.length > 1 ? `Active #${rs.selectedCrewIdx}.${ptIdx}` : `Active #${rs.selectedCrewIdx}`;
+      const ptLabel = pts.length > 1 ? `Active ${rs.selectedCrewIdx}.${ptIdx}: [${rs.selectedCrewIdx + 1}]` : `Active ${rs.selectedCrewIdx}: [${rs.selectedCrewIdx + 1}]`;
       label.textContent = `${ptLabel}: ${r.name}`;
       const key = `active-${rs.selectedCrewIdx}-${ptIdx}`;
       if (fieldsDiv.dataset.key !== key) {
@@ -1389,6 +1400,7 @@ export class UI {
       if (this._taskEditActive && this._selectedHandoff >= 0) {
         this._selectedHandoff = -1;
         this._syncTaskRow();
+        this._update();
       }
     }
 

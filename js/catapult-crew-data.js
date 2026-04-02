@@ -1,8 +1,22 @@
-/* Catapult crew data — populated from crew.lua ["crew"] section on import.
+/* Catapult crew data — initialized from VV_AdjAllcats defaults, replaced on crew.lua import.
    4 catapults × 6 members (shooter, director, white1, white2, green_hbb, green_nw).
    Each member has idle position and movement routes (launch, initial, free_cat, occupy_cat). */
 
-export const CATAPULT_CREWS = [];          // [{name, members: [{name, position, routes}]}]
+import { DEFAULT_CATAPULT_CREWS } from './catapult-crew-defaults.js';
+
+export const CATAPULT_CREWS = DEFAULT_CATAPULT_CREWS.map(c => ({
+  name: c.name,
+  members: c.members.map(m => ({
+    ...m,
+    position: { ...m.position },
+    fastStartPosition: m.fastStartPosition ? { ...m.fastStartPosition } : null,
+    angles: [...(m.angles || [])],
+    routes: m.routes.map(r => ({
+      ...r,
+      points: r.points.map(p => ({ ...p })),
+    })),
+  })),
+}));
 
 export const CATAPULT_MEMBER_COLORS = {
   shooter:   { fill: '#e74c3c', stroke: '#c0392b' },   // red

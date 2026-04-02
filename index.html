@@ -8,14 +8,18 @@
   v0.1.18 — Fix scroll-wheel crew rotation in combined mode, progress bar click deselects crew
   v0.1.19 — Related button moved to idle panel, filters active routes + takeoff/landing routes
   v0.1.20 — Show parked F-14 outlines on visible takeoff/landing routes (Parked toggle)
-  v0.1.21 — Spawn diameter/despawn time spinners in points panel, Elevators section with type selectors
+  v0.1.25 — Spawn diameter/despawn time spinners in points panel, Elevators section with type selectors
+  v0.1.25 — Default catapult crew data, orange line points to director occupy_cat, task edit redraw fix
+  v0.1.25 — Fix handoff drag: re-sort steps by progress during drag so controlling step and gray lines update correctly
+  v0.1.25 — Export RunwayIdx changes + takeoff task edits (progress, members, steps) to Lua files
+  v0.1.26 — Task add/del buttons: smaller, non-bold text matching number style
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.21</title>
+  <title>SuperCarrier Marshalling Editor v0.1.26</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -23,7 +27,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.21</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.26</h1>
     </div>
     <canvas id="c" height="750"></canvas>
     <div class="canvas-resize-handle" id="canvas-resize-handle"></div>
@@ -49,8 +53,8 @@
           <span class="task-right-spacer"></span>
           <span class="task-handoff-val" id="task-handoff-val"></span>
           <span class="task-action-group" id="task-action-group">
-            <button class="task-action-btn" id="btn-task-add" title="Add step">+</button>
-            <button class="task-action-btn" id="btn-task-delete" title="Delete selected step">&minus;</button>
+            <button class="task-action-btn" id="btn-task-add" title="Add step">add</button>
+            <button class="task-action-btn" id="btn-task-delete" title="Delete selected step">del</button>
           </span>
           <button class="route-edit-btn" id="btn-edit-task">Edit Task</button>
         </div>

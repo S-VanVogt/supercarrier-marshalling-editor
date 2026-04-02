@@ -354,13 +354,98 @@ export function patchCatCrewLua(lua, catapultCrews, originalCatCrews) {
   return lua;
 }
 
+// ── Takeoff task patching ─────────────────────────────────────────────────
+
 /**
- * Download patched crew.lua as a file (includes both deck crew and catapult crew edits).
+ * Find each task entry [N] = { ... } within ["takeoff_tasks"].
+ * Returns array of { taskIdx (0-based), innerStart, innerEnd } where
+ * innerStart/innerEnd bracket the content between the task's outer braces.
  */
-export function downloadPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment) {
+function findTakeoffTaskBlocks(lua) {
+  const tcIdx = lua.indexOf('["takeoff_crew"]');
+  if (tcIdx < 0) return [];
+  const ttKey = '["takeoff_tasks"]';
+  const ttIdx = lua.indexOf(ttKey, tcIdx);
+  if (ttIdx < 0) return [];
+  const ttOpen = lua.indexOf('{', ttIdx + ttKey.length);
+  const ttClose = findMatchingBrace(lua, ttOpen);
+  if (ttClose < 0) return [];
+
+  const section = lua.slice(ttOpen, ttClose + 1);
+  const blocks = [];
+  const entryRe = /\[(\d+)\]\s*=\s*\{/g;
+  let match;
+  while ((match = entryRe.exec(section)) !== null) {
+    const luaIdx = parseInt(match[1]);
+    const braceStart = ttOpen + match.index + match[0].length - 1;
+    const braceEnd = findMatchingBrace(lua, braceStart);
+    if (braceEnd < 0) continue;
+    blocks.push({
+      taskIdx: luaIdx - 1,
+      innerStart: braceStart + 1,
+      innerEnd: braceEnd,
+    });
+    entryRe.lastIndex = braceStart + (braceEnd - braceStart) + 1 - ttOpen;
+  }
+  return blocks;
+}
+
+/**
+ * Build the inner content of a takeoff task block.
+ * Preserves the Lua formatting convention.
+ */
+function buildTaskInner(task) {
+  const indent = '                ';
+  const lines = [];
+  // Steps
+  for (let i = 0; i < task.steps.length; i++) {
+    const s = task.steps[i];
+    lines.push(`${indent}[${i + 1}] = {`);
+    lines.push(`${indent}    ["progress"] = ${s.progress},`);
+    lines.push(`${indent}    ["member_id"] = ${s.memberId},`);
+    lines.push(`${indent}    ["route_id"] = ${s.routeId},`);
+    lines.push(`${indent}},`);
+  }
+  // Brown fields
+  lines.push(`${indent}["brown_route_id"] = ${task.brownRouteId},`);
+  lines.push(`${indent}["brown_id"] = ${task.brownId},`);
+  return '\n' + lines.join('\n') + '\n            ';
+}
+
+/**
+ * Patch takeoff task data into crew.lua text.
+ */
+export function patchTakeoffTasks(lua, tasks) {
+  const blocks = findTakeoffTaskBlocks(lua);
+  if (blocks.length === 0) return lua;
+
+  const patches = [];
+  for (const block of blocks) {
+    if (block.taskIdx < 0 || block.taskIdx >= tasks.length) continue;
+    patches.push({
+      start: block.innerStart,
+      end: block.innerEnd,
+      replacement: buildTaskInner(tasks[block.taskIdx]),
+    });
+  }
+
+  patches.sort((a, b) => b.start - a.start);
+  for (const p of patches) {
+    lua = lua.slice(0, p.start) + p.replacement + lua.slice(p.end);
+  }
+  return lua;
+}
+
+/**
+ * Download patched crew.lua as a file (includes deck crew, catapult crew, and task edits).
+ */
+export function downloadPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks) {
   let patched = patchCrewLua(originalText, members, routes, headerComment);
   if (catapultCrews && catapultCrews.length > 0) {
     patched = patchCatCrewLua(patched, catapultCrews, originalCatCrews);
+  }
+  if (takeoffTasks && takeoffTasks.length > 0) {
+    patched = patchTakeoffTasks(patched, takeoffTasks);
   }
   const blob = new Blob([patched], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);

@@ -88,8 +88,9 @@ class RouteState {
     this.catCrewDraggingPoint = -1;    // index of waypoint being dragged
     this.catCrewSelectedPoint = -1;    // last-selected waypoint for highlight
 
-    /** @type {Array|null} Snapshot for revert */
+    /** @type {Array|null} Snapshot for revert — initialized from defaults */
     this._originalCatCrews = null;
+    if (CATAPULT_CREWS.length > 0) this.refreshCatCrewSnapshots();
 
     /** @type {Set<() => void>} */
     this._listeners = new Set();

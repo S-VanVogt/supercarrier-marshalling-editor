@@ -45,6 +45,12 @@ function findRoutePointsBlocks(lua) {
 
     // Look for "RunwayIdx"
     if (slice.slice(i, i + 10) === 'RunwayIdx ') {
+      // Capture RunwayIdx value position: "RunwayIdx = N"
+      const rwEqIdx = slice.indexOf('=', i + 9);
+      const rwValMatch = rwEqIdx >= 0 ? slice.slice(rwEqIdx + 1, rwEqIdx + 10).match(/\s*(\d+)/) : null;
+      const rwValStart = rwValMatch ? topBrace + rwEqIdx + 1 + rwValMatch.index + rwValMatch[0].indexOf(rwValMatch[1]) : -1;
+      const rwValEnd = rwValStart >= 0 ? rwValStart + rwValMatch[1].length : -1;
+
       // Find "Points =" after this
       const ptsEq = slice.indexOf('Points =', i);
       if (ptsEq < 0) { i++; continue; }
@@ -71,6 +77,8 @@ function findRoutePointsBlocks(lua) {
             blocks.push({
               pointsStart: topBrace + pBrace + 1,
               pointsEnd: topBrace + j,
+              rwValStart,
+              rwValEnd,
             });
             i = j + 1;
             break;
@@ -380,12 +388,23 @@ export function patchLua(originalLua, editedRoutes) {
     throw new Error(`Expected 16 route blocks, found ${blocks.length}`);
   }
 
+  // Collect all patches (points inner + RunwayIdx values)
+  const patches = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const { pointsStart, pointsEnd, rwValStart, rwValEnd } = blocks[i];
+    // Patch Points inner content
+    patches.push({ start: pointsStart, end: pointsEnd, text: buildPointsInner(editedRoutes[i]) });
+    // Patch RunwayIdx value if the route has one and it differs
+    if (rwValStart >= 0 && rwValEnd >= 0 && editedRoutes[i].runwayIdx != null) {
+      patches.push({ start: rwValStart, end: rwValEnd, text: String(editedRoutes[i].runwayIdx) });
+    }
+  }
+
+  // Apply in reverse offset order to preserve positions
+  patches.sort((a, b) => b.start - a.start);
   let result = originalLua;
-  // Patch in reverse order to preserve offsets
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const { pointsStart, pointsEnd } = blocks[i];
-    const newInner = buildPointsInner(editedRoutes[i]);
-    result = result.slice(0, pointsStart) + newInner + result.slice(pointsEnd);
+  for (const p of patches) {
+    result = result.slice(0, p.start) + p.text + result.slice(p.end);
   }
   return result;
 }

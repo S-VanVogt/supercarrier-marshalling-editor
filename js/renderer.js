@@ -752,7 +752,7 @@ export class Renderer {
     ctx.translate(cp.x, cp.y);
     ctx.rotate(heading);
     ctx.globalAlpha = alpha != null ? alpha : 0.5;
-    ctx.drawImage(this._f14Img, -offsetX + 0.15 * drawW, -offsetY, drawW, drawH);
+    ctx.drawImage(this._f14Img, -offsetX + 0.05 * drawW, -offsetY, drawW, drawH);
     ctx.globalAlpha = 1.0;
     ctx.restore();
   }
@@ -1213,9 +1213,25 @@ export class Renderer {
       const cs = task.steps[controllingIdx];
       target = this._crewTarget(cs.routeId, cs.memberId);
     } else {
-      // Past last step → catapult
-      const cat = Renderer.CATAPULTS[route.runwayIdx - 1];
-      if (cat) target = { x: cat.cx, y: cat.cy };
+      // Past last step → director's occupy_cat position for this catapult
+      const catIdx = route.runwayIdx - 1;
+      const crew = CATAPULT_CREWS[catIdx];
+      if (crew) {
+        const director = crew.members.find(m => m.name && m.name.includes('director'));
+        if (director) {
+          const occupyPhase = CATAPULT_PHASES.find(p => p.id === 'occupy_cat');
+          const occupyRoute = occupyPhase && findPhaseRoute(director, occupyPhase);
+          if (occupyRoute && occupyRoute.points.length > 0) {
+            const lastPt = occupyRoute.points[occupyRoute.points.length - 1];
+            target = { x: lastPt.x, y: lastPt.y };
+          }
+        }
+      }
+      // Fallback to catapult center if no director data available
+      if (!target) {
+        const cat = Renderer.CATAPULTS[catIdx];
+        if (cat) target = { x: cat.cx, y: cat.cy };
+      }
     }
 
     if (target) {
