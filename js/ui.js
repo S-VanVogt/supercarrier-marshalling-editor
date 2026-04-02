@@ -281,6 +281,7 @@ export class UI {
     // Export Crew
     document.getElementById('btn-export-crew').addEventListener('click', () => {
       if (!this._originalCrewLuaText) { alert('crew.lua not imported yet.'); return; }
+      this._enforceAllCatCrewHide();
       const headerComment = document.getElementById('crew-header-comment').value.trim();
       downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment, TAKEOFF_TASKS);
     });
@@ -361,6 +362,7 @@ export class UI {
         downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp, this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
       }
       if (this._originalCrewLuaText) {
+        this._enforceAllCatCrewHide();
         downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS);
       }
       // Update loaded variant and save notes for next export
@@ -2322,7 +2324,7 @@ export class UI {
     }
   }
 
-  /** Toggle all h values for a catapult's crew between deck height and sea level. */
+  /** Set all h values for a catapult's crew to deck height or sea level. */
   _applyCatCrewHide(catIdx) {
     const DECK_H = 20.1494140625;
     const SEA_H = 0.0123;
@@ -2340,6 +2342,13 @@ export class UI {
           pt.h = h;
         }
       }
+    }
+  }
+
+  /** Enforce current hide button state on all 4 catapults before export. */
+  _enforceAllCatCrewHide() {
+    for (let i = 0; i < 4; i++) {
+      this._applyCatCrewHide(i);
     }
   }
 

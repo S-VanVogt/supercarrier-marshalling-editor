@@ -21,13 +21,15 @@
   v0.1.42 — Mobile touch support, responsive canvas height
   v0.1.43 — High-DPI canvas rendering for sharp display on iPad/mobile
   v0.1.44 — Cat crew hide button: sets h to 0.0123 per catapult to sink crew below deck
+  v0.1.45 — Enforce cat crew hide state on export, fix h comparison in route diff
+  v0.1.46 — Fix snapshot sharing fastStartPosition reference, breaking hide export
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.44</title>
+  <title>SuperCarrier Marshalling Editor v0.1.46</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -35,7 +37,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.44</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.46</h1>
       <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
     <canvas id="c" height="475"></canvas>

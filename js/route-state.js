@@ -586,6 +586,7 @@ class RouteState {
       members: c.members.map(m => ({
         ...m,
         position: { ...m.position },
+        fastStartPosition: m.fastStartPosition ? { ...m.fastStartPosition } : null,
         routes: m.routes.map(r => ({
           ...r,
           points: r.points.map(p => ({ ...p })),
