@@ -24,13 +24,15 @@
   v0.1.45 — Enforce cat crew hide state on export, fix h comparison in route diff
   v0.1.46 — Fix snapshot sharing fastStartPosition reference, breaking hide export
   v0.1.47 — Takeoff task validation: block route_id=-1/0, brown_route_id>15, red invalid boxes, export gate
+  v0.1.48 — Canvas validation warning, invalid route row highlighting, crew list rebuild on reassign
+  v0.1.49 — Member >5 active routes soft warning (orange), refresh CREW_ACTIVE_LINKS on task mutation
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.47</title>
+  <title>SuperCarrier Marshalling Editor v0.1.50</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -38,7 +40,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.47</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.50</h1>
       <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
     <canvas id="c" height="475"></canvas>
@@ -229,10 +231,22 @@
   <!-- Config (combined I/O) -->
   <div class="tab-pane" id="panel-config">
     <div class="panel-body">
+      <div class="btn-row" style="align-items:center;gap:6px;flex-wrap:wrap">
+        <button id="btn-set-sc-folder" title="Select SC-Configs root folder">📂 SC-Configs</button>
+        <span id="sc-folder-label" class="hint" style="margin:0;font-size:11px;color:#888">No folder set</span>
+        <select id="sc-config-select" style="font-size:12px;padding:3px 6px;border:0.5px solid #b4b2a9;border-radius:6px;min-width:180px" disabled>
+          <option value="">— select config —</option>
+        </select>
+        <button id="btn-load-config" disabled>Load</button>
+        <button id="btn-save-config" disabled>Save</button>
+      </div>
+    </div>
+    <div class="config-separator"></div>
+    <div class="panel-body">
       <div class="btn-row" style="align-items:center">
         <button id="btn-import-config">Import Config</button>
         <button id="btn-export-config">Export Config</button>
-        <span class="hint" style="margin:0">Import Config expects a folder containing the SC script files (R&amp;R, crew).</span>
+        <span class="hint" style="margin:0">Folder picker fallback (no direct save).</span>
       </div>
       <div id="export-stamp-form" style="display:none;width:100%;margin-top:6px;padding:8px;background:#f5f4f0;border-radius:8px;border:0.5px solid #b4b2a9">
         <div style="display:flex;gap:8px;align-items:center">
@@ -253,7 +267,6 @@
         <button id="btn-export-lua">Export RunwaysAndRoutes</button>
         <button id="btn-export-crew">Export Crew</button>
       </div>
-      <div class="takeoff-validation-warning" id="takeoff-validation-warning" style="display:none"></div>
       <div class="btn-row" style="margin-top:4px">
         <input type="text" id="lua-header-comment" placeholder="Header comment for exported RR lua" style="flex:1;min-width:160px;font-size:12px;padding:4px 8px;border:0.5px solid #b4b2a9;border-radius:8px;outline:none">
         <input type="text" id="crew-header-comment" placeholder="Header comment for exported crew lua" style="flex:1;min-width:160px;font-size:12px;padding:4px 8px;border:0.5px solid #b4b2a9;border-radius:8px;outline:none">

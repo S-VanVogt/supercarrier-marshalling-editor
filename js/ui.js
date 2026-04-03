@@ -5,15 +5,16 @@
 import { polylinePoint, segmentLengths } from './polyline.js';
 import { CATAPULT_COLORS, CAT_TAIL_POINTS, LANDING_COLOR } from './route-data.js';
 import { CREW_MEMBERS, LIVERY_COLOURS } from './crew-data.js';
-import { downloadPatchedLua, parseTakeoffRoutes, parseLandingRoutes, parseElevators, patchElevators, parseBlockerTerminals, patchBlockerTerminals } from './lua-patcher.js';
+import { downloadPatchedLua, buildPatchedLua, parseTakeoffRoutes, parseLandingRoutes, parseElevators, patchElevators, parseBlockerTerminals, patchBlockerTerminals } from './lua-patcher.js';
 import { parseCrewLua } from './crew-lua-parser.js';
 import { replaceCrewMembers } from './crew-data.js';
-import { CREW_ROUTES, CREW_ACTIVE_LINKS, replaceCrewRoutes } from './crew-routes-data.js';
-import { replaceTaskData, TAKEOFF_TASKS, PARKING_TASKS } from './takeoff-tasks-data.js';
-import { patchCrewLua, downloadPatchedCrewLua } from './crew-lua-patcher.js';
+import { CREW_ROUTES, CREW_ACTIVE_LINKS, replaceCrewRoutes, refreshCrewActiveLinks } from './crew-routes-data.js';
+import { replaceTaskData, refreshTaskDerivedData, TAKEOFF_TASKS, PARKING_TASKS } from './takeoff-tasks-data.js';
+import { patchCrewLua, downloadPatchedCrewLua, buildPatchedCrewLua } from './crew-lua-patcher.js';
 import { parseCatapultCrew } from './crew-lua-parser.js';
 import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs, replaceCatapultCrews } from './catapult-crew-data.js';
 import { validateTakeoffTasks } from './takeoff-validation.js';
+import * as CS from './config-store.js';
 
 export class UI {
   /** @param {import('./viewport.js').Viewport} viewport  @param {import('./renderer.js').Renderer} renderer  @param {import('./route-state.js').RouteState} routeState */
@@ -221,6 +222,9 @@ export class UI {
     const addEnter = e => { if (e.key === 'Enter') this._addFromInputs(); };
     this.addXInput.addEventListener('keydown', addEnter);
     this.addYInput.addEventListener('keydown', addEnter);
+
+    // ── SC-Configs folder-based I/O (File System Access API) ─────────────
+    this._initConfigStore();
 
     // Import Lua
     document.getElementById('btn-import-lua').addEventListener('click', () => {
@@ -528,8 +532,7 @@ export class UI {
 
     // Crew member rows
     this._buildCrewRefMaps();
-    this._rebuildCrewIdleList();
-    this._rebuildCrewActiveList();
+    this._rebuildCrewLists();
   }
 
   /** Build maps: memberId → Set of takeoff/landing task indices, routeId → same. */
@@ -617,6 +620,14 @@ export class UI {
     if (refs.takeoff.size > 0) parts.push([...refs.takeoff].sort((a, b) => a - b).map(n => `T${n}`).join(' '));
     if (refs.landing.size > 0) parts.push([...refs.landing].sort((a, b) => a - b).map(n => `L${n}`).join(' '));
     return parts.join(' ');
+  }
+
+  _rebuildCrewLists() {
+    refreshCrewActiveLinks(TAKEOFF_TASKS);
+    refreshTaskDerivedData();
+    this._buildCrewRefMaps();
+    this._rebuildCrewIdleList();
+    this._rebuildCrewActiveList();
   }
 
   _rebuildCrewIdleList() {
@@ -799,6 +810,178 @@ export class UI {
     return { name: m[1].trim(), version: '' };
   }
 
+  // ── SC-Configs folder store ────────────────────────────────────────────
+
+  async _initConfigStore() {
+    const scBtn = document.getElementById('btn-set-sc-folder');
+    const label = document.getElementById('sc-folder-label');
+    const select = document.getElementById('sc-config-select');
+    const loadBtn = document.getElementById('btn-load-config');
+    const saveBtn = document.getElementById('btn-save-config');
+
+    if (!CS.isSupported()) {
+      scBtn.style.display = 'none';
+      label.textContent = 'File System Access API not supported';
+      return;
+    }
+
+    // Visual state helper — highlights button when no root is set
+    const updateRootVisual = () => {
+      if (CS.hasRoot()) {
+        scBtn.classList.remove('needs-attention');
+        label.textContent = CS.getRootName();
+        label.style.color = '';
+      } else {
+        scBtn.classList.add('needs-attention');
+        label.textContent = 'No folder set — click to select SC-Configs root';
+        label.style.color = '#c0392b';
+      }
+    };
+
+    // Try to restore saved folder handle (no permission prompt yet)
+    const restored = await CS.restoreRootFolder(false);
+    if (restored) {
+      await this._refreshConfigList();
+    }
+    updateRootVisual();
+
+    // Set SC-Configs folder button
+    scBtn.addEventListener('click', async () => {
+      try {
+        await CS.pickRootFolder();
+        updateRootVisual();
+        console.log('[SC-Config] Root folder set:', CS.getRootName());
+        await this._refreshConfigList();
+        console.log('[SC-Config] Config list refreshed, options:', select.options.length - 1);
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error('[SC-Config] pickRootFolder error:', err);
+          alert('Failed to set folder: ' + err.message);
+        }
+      }
+    });
+
+    // Config select change
+    select.addEventListener('change', () => {
+      const name = select.value;
+      loadBtn.disabled = !name;
+      saveBtn.disabled = !name;
+      if (name) CS.setActiveConfig(name);
+    });
+
+    // Load button
+    loadBtn.addEventListener('click', async () => {
+      const name = select.value;
+      if (!name) return;
+      try {
+        // Re-request permission if needed (user gesture context)
+        if (!CS.hasRoot()) {
+          const ok = await CS.restoreRootFolder(true);
+          if (!ok) { alert('Permission denied. Please re-select the SC-Configs folder.'); return; }
+        }
+        const rrText = await CS.readConfigFile(name, 'USS_Nimitz_RunwaysAndRoutes.lua');
+        const crewText = await CS.readConfigFile(name, 'crew.lua');
+        if (!rrText && !crewText) { alert('No .lua files found in ' + name); return; }
+        if (rrText) {
+          const routes = parseTakeoffRoutes(rrText);
+          this.rs.loadTakeoffRoutes(routes);
+          const landingRoutes = parseLandingRoutes(rrText);
+          if (landingRoutes) this.rs.loadLandingRoutes(landingRoutes);
+          const elevators = parseElevators(rrText);
+          if (elevators) this._loadElevators(elevators);
+          const blockers = parseBlockerTerminals(rrText);
+          if (blockers) this._loadBlockerTerminals(blockers);
+          this._originalLuaText = rrText;
+          this._rebuildRouteList();
+          const stamp = this._parseScConfigStamp(rrText);
+          if (stamp) this.rs.loadedVariant = stamp;
+        }
+        if (crewText) {
+          this._importCrewLua(crewText);
+        }
+        this.rs.refreshRouteSnapshots();
+        this.rs._notify();
+        CS.setActiveConfig(name);
+        const loaded = [rrText && 'RunwaysAndRoutes', crewText && 'crew.lua'].filter(Boolean).join(' + ');
+        console.log(`Config loaded from ${name}: ${loaded}`);
+      } catch (err) {
+        alert('Failed to load config: ' + err.message);
+      }
+    });
+
+    // Save button — writes directly to the selected config folder
+    saveBtn.addEventListener('click', async () => {
+      const name = select.value;
+      if (!name) return;
+      if (!this._originalLuaText && !this._originalCrewLuaText) {
+        alert('No files loaded yet.'); return;
+      }
+      // Re-request permission if needed
+      if (!CS.hasRoot()) {
+        const ok = await CS.restoreRootFolder(true);
+        if (!ok) { alert('Permission denied. Please re-select the SC-Configs folder.'); return; }
+      }
+      // Validate takeoff tasks before saving
+      if (this._originalCrewLuaText && !this._confirmTakeoffValidation()) return;
+      // Build stamp
+      const lv = this.rs.loadedVariant;
+      const ver = lv && lv.version ? lv.version : '';
+      const configName = lv ? lv.name : name;
+      const date = new Date().toISOString().slice(0, 10);
+      let stamp = `-- [SC-Config] ${configName} ${ver}\n`;
+      stamp += `-- [SC-Config] Modified: ${date}\n`;
+      try {
+        if (this._originalLuaText) {
+          const patched = buildPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp,
+            this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
+          await CS.writeConfigFile(name, 'USS_Nimitz_RunwaysAndRoutes.lua', patched);
+        }
+        if (this._originalCrewLuaText) {
+          this._enforceAllCatCrewHide();
+          const patched = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
+            CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS);
+          await CS.writeConfigFile(name, 'crew.lua', patched);
+        }
+        const saved = [this._originalLuaText && 'RunwaysAndRoutes', this._originalCrewLuaText && 'crew.lua'].filter(Boolean).join(' + ');
+        console.log(`Config saved to ${name}: ${saved}`);
+        // Brief visual feedback
+        saveBtn.textContent = '✓ Saved';
+        setTimeout(() => { saveBtn.textContent = 'Save'; }, 1500);
+      } catch (err) {
+        alert('Failed to save config: ' + err.message);
+      }
+    });
+  }
+
+  async _refreshConfigList() {
+    const select = document.getElementById('sc-config-select');
+    const loadBtn = document.getElementById('btn-load-config');
+    const saveBtn = document.getElementById('btn-save-config');
+    try {
+      const configs = await CS.listConfigs();
+      console.log('[SC-Config] Found configs:', configs);
+      // Clear and repopulate
+      select.innerHTML = '<option value="">— select config —</option>';
+      for (const name of configs) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        select.appendChild(opt);
+      }
+      select.disabled = configs.length === 0;
+      // Restore last selection
+      const last = CS.getLastConfig();
+      if (last && configs.includes(last)) {
+        select.value = last;
+        loadBtn.disabled = false;
+        saveBtn.disabled = false;
+      }
+    } catch (err) {
+      console.error('[SC-Config] Failed to list configs:', err);
+      select.disabled = true;
+    }
+  }
+
   _importCrewLua(text) {
     const data = parseCrewLua(text);
 
@@ -829,8 +1012,7 @@ export class UI {
 
     // Rebuild crew panels
     this._buildCrewRefMaps();
-    this._rebuildCrewIdleList();
-    this._rebuildCrewActiveList();
+    this._rebuildCrewLists();
 
     // Parse catapult crew section
     try {
@@ -884,6 +1066,11 @@ export class UI {
   }
 
   _syncRoutePanel() {
+    // Build set of task indices with validation errors
+    const { errors } = validateTakeoffTasks(TAKEOFF_TASKS, PARKING_TASKS);
+    const invalidTaskIndices = new Set(errors.map(e => e.taskIdx));
+    this._syncTakeoffValidationWarning();
+
     // Takeoff panel
     const rows = document.querySelectorAll('#takeoff-route-list .route-row');
     for (let i = 0; i < rows.length; i++) {
@@ -893,6 +1080,7 @@ export class UI {
       const isSelected = this.rs.selectedRouteType === 'takeoff' && this.rs.selectedRoute === i;
       btn.classList.toggle('active', isSelected);
       rows[i].classList.toggle('selected', isSelected);
+      rows[i].classList.toggle('invalid', invalidTaskIndices.has(i));
       const revertBtn = rows[i].querySelector('.route-revert-btn');
       revertBtn.disabled = !this.rs.isRouteModified(i);
     }
@@ -993,6 +1181,7 @@ export class UI {
         else step.routeId = idx;
       }
       this._exitAssignMode();
+      this._rebuildCrewLists();
       this._update();
       return true;
     }
@@ -1002,6 +1191,7 @@ export class UI {
       const step = task.steps[this._selectedHandoff];
       if (type === 'idle') step.memberId = idx;
       else step.routeId = idx;
+      this._rebuildCrewLists();
       this._syncTaskRow();
       this._update();
       return true;
@@ -1314,6 +1504,7 @@ export class UI {
     }
 
     this._exitAssignMode();
+    this._rebuildCrewLists();
     this._update();
     return true;
   }
@@ -1348,6 +1539,7 @@ export class UI {
 
     // Select the new step
     this._selectedHandoff = steps.indexOf(newStep);
+    this._rebuildCrewLists();
     this._syncTaskRow();
     this._update();
   }
@@ -1361,6 +1553,7 @@ export class UI {
     if (this._selectedHandoff >= task.steps.length) {
       this._selectedHandoff = task.steps.length - 1;
     }
+    this._rebuildCrewLists();
     this._syncTaskRow();
     this._update();
   }
@@ -1372,24 +1565,36 @@ export class UI {
     const isTakeoff = this.rs.selectedRouteType === 'takeoff';
     step.memberId = 0;
     step.routeId = isTakeoff ? 1 : -1;
+    this._rebuildCrewLists();
     this._syncTaskRow();
     this._update();
   }
 
   _confirmTakeoffValidation() {
-    const errors = validateTakeoffTasks(TAKEOFF_TASKS);
-    if (errors.length === 0) return true;
-    const msg = errors.map(e => `Task ${e.taskIdx + 1}: ${e.message}`).join('\n');
-    return confirm(`WARNING: Invalid takeoff task data will crash DCS:\n\n${msg}\n\nExport anyway?`);
+    const { errors, warnings } = validateTakeoffTasks(TAKEOFF_TASKS, PARKING_TASKS);
+    if (errors.length === 0 && warnings.length === 0) return true;
+    let msg = '';
+    if (errors.length > 0) {
+      msg += 'ERRORS (will crash DCS):\n' + errors.map(e => `  Task ${e.taskIdx + 1}: ${e.message}`).join('\n') + '\n\n';
+    }
+    if (warnings.length > 0) {
+      msg += 'WARNINGS:\n' + warnings.map(w => `  ${w.message}`).join('\n') + '\n\n';
+    }
+    return confirm(msg + 'Export anyway?');
   }
 
   _syncTakeoffValidationWarning() {
-    const warn = document.getElementById('takeoff-validation-warning');
-    if (!warn) return;
-    const errors = validateTakeoffTasks(TAKEOFF_TASKS);
-    if (errors.length === 0) { warn.style.display = 'none'; return; }
-    warn.style.display = '';
-    warn.textContent = 'Warning: ' + errors.map(e => `Task ${e.taskIdx + 1} ${e.message}`).join('; ');
+    const { errors, warnings } = validateTakeoffTasks(TAKEOFF_TASKS, PARKING_TASKS);
+    if (errors.length === 0 && warnings.length === 0) {
+      this.renderer.validationWarning = null;
+      this.renderer.validationWarningLevel = null;
+    } else if (errors.length > 0) {
+      this.renderer.validationWarning = '\u26A0 ' + errors.map(e => `Task ${e.taskIdx + 1}: ${e.message}`).join('  |  ');
+      this.renderer.validationWarningLevel = 'error';
+    } else {
+      this.renderer.validationWarning = '\u26A0 ' + warnings.map(w => w.message).join('  |  ');
+      this.renderer.validationWarningLevel = 'warning';
+    }
   }
 
   /** Nudge overlapping positions so boxes don't stack. Returns adjusted 0-1 values for display. */

@@ -434,15 +434,13 @@ export function patchLandingLua(originalLua, editedRoutes) {
 }
 
 /**
- * Download the patched Lua file as a Blob.
+ * Build the fully patched Lua string (no download).
  */
-export function downloadPatchedLua(originalLua, editedRoutes, headerComment, elevatorTypes, blockerTerminals, landingRoutes) {
+export function buildPatchedLua(originalLua, editedRoutes, headerComment, elevatorTypes, blockerTerminals, landingRoutes) {
   let patched = patchLua(originalLua, editedRoutes);
-  // Patch landing routes if provided
   if (landingRoutes) {
     patched = patchLandingLua(patched, landingRoutes);
   }
-  // Patch elevator types if provided
   if (elevatorTypes) {
     const entries = [];
     for (const [idx, type] of Object.entries(elevatorTypes)) {
@@ -451,17 +449,23 @@ export function downloadPatchedLua(originalLua, editedRoutes, headerComment, ele
     }
     patched = patchElevators(patched, entries);
   }
-  // Patch blocker terminals if provided
   if (blockerTerminals) {
     patched = patchBlockerTerminals(patched, blockerTerminals);
   }
   if (headerComment && headerComment.startsWith('-- [SC-Config]')) {
-    // Pre-formatted stamp: strip old stamp lines, prepend new stamp
     patched = patched.split('\n').filter(l => !l.startsWith('-- [SC-Config]')).join('\n');
     patched = headerComment + patched;
   } else if (headerComment) {
     patched = '-- ' + headerComment + '\n' + patched;
   }
+  return patched;
+}
+
+/**
+ * Download the patched Lua file as a Blob.
+ */
+export function downloadPatchedLua(originalLua, editedRoutes, headerComment, elevatorTypes, blockerTerminals, landingRoutes) {
+  const patched = buildPatchedLua(originalLua, editedRoutes, headerComment, elevatorTypes, blockerTerminals, landingRoutes);
   const blob = new Blob([patched], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

@@ -188,6 +188,28 @@ export const CREW_ACTIVE_LINKS = (() => {
 })();
 
 /**
+ * Refresh CREW_ACTIVE_LINKS from current TAKEOFF_TASKS (after task mutation).
+ * @param {Array} takeoffTasks — current TAKEOFF_TASKS array
+ */
+export function refreshCrewActiveLinks(takeoffTasks) {
+  TASK_ASSIGNMENTS.length = 0;
+  for (const task of takeoffTasks) {
+    for (const step of task.steps) {
+      TASK_ASSIGNMENTS.push({ memberIdx: step.memberId, routeId: step.routeId });
+    }
+    TASK_ASSIGNMENTS.push({ memberIdx: task.brownId, routeId: task.brownRouteId });
+  }
+  CREW_ACTIVE_LINKS.length = 0;
+  const seen = new Set();
+  for (const a of TASK_ASSIGNMENTS) {
+    const key = `${a.memberIdx}:${a.routeId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    CREW_ACTIVE_LINKS.push(a);
+  }
+}
+
+/**
  * Replace all crew route and task data in-place from parsed crew.lua data.
  * Recalculates CREW_ACTIVE_LINKS.
  */

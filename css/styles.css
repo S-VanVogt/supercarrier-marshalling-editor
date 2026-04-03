@@ -601,6 +601,18 @@ button:hover { background: #f1efe8; }
   margin: 8px 0;
 }
 
+/* SC-Configs folder button — needs attention state */
+button.needs-attention {
+  border: 1.5px dashed #c0392b;
+  color: #c0392b;
+  background: #fdf0ef;
+  animation: pulse-attention 2s ease-in-out infinite;
+}
+@keyframes pulse-attention {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(192,57,43,0.15); }
+  50% { box-shadow: 0 0 0 4px rgba(192,57,43,0.12); }
+}
+
 .panel-body {
   padding: 10px 12px;
   display: flex;
@@ -752,6 +764,8 @@ button:hover { background: #f1efe8; }
 }
 .route-row:hover { background: #f1efe8; }
 .route-row.selected { background: #e8e6df; outline: 1px solid #999; }
+.route-row.invalid { background: #fde8e8; }
+.route-row.invalid:hover { background: #fad4d4; }
 .route-row.task-highlight { background: #e0ecf8; }
 .route-row.task-highlight:hover { background: #d4e4f4; }
 

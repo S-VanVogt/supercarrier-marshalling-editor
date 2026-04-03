@@ -526,9 +526,9 @@ export function patchTakeoffTasks(lua, tasks) {
 }
 
 /**
- * Download patched crew.lua as a file (includes deck crew, catapult crew, and task edits).
+ * Build the fully patched crew.lua string (no download).
  */
-export function downloadPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks) {
+export function buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks) {
   let patched = patchCrewLua(originalText, members, routes, headerComment);
   if (catapultCrews && catapultCrews.length > 0) {
     patched = patchCatCrewLua(patched, catapultCrews, originalCatCrews);
@@ -536,6 +536,14 @@ export function downloadPatchedCrewLua(originalText, members, routes, catapultCr
   if (takeoffTasks && takeoffTasks.length > 0) {
     patched = patchTakeoffTasks(patched, takeoffTasks);
   }
+  return patched;
+}
+
+/**
+ * Download patched crew.lua as a file (includes deck crew, catapult crew, and task edits).
+ */
+export function downloadPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks) {
+  const patched = buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks);
   const blob = new Blob([patched], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

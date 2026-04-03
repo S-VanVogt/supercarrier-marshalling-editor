@@ -435,3 +435,46 @@ export function replaceTaskData(takeoffTasks, parkingTasks) {
     NON_TAKEOFF_LINKS.push(a);
   }
 }
+
+/**
+ * Refresh all derived data from current TAKEOFF_TASKS / PARKING_TASKS in-place.
+ * Call after mutating task steps (reassign, add, delete, reset).
+ */
+export function refreshTaskDerivedData() {
+  // Rebuild TAKEOFF_USED_ROUTE_IDS
+  TAKEOFF_USED_ROUTE_IDS.clear();
+  for (const task of TAKEOFF_TASKS) {
+    TAKEOFF_USED_ROUTE_IDS.add(task.brownRouteId);
+    for (const step of task.steps) {
+      TAKEOFF_USED_ROUTE_IDS.add(step.routeId);
+    }
+  }
+
+  // Rebuild PARKING_ASSIGNMENTS
+  PARKING_ASSIGNMENTS.length = 0;
+  for (const task of PARKING_TASKS) {
+    for (const step of task.steps) {
+      if (step.routeId >= 0) {
+        PARKING_ASSIGNMENTS.push({ memberId: step.memberId, routeId: step.routeId });
+      }
+    }
+  }
+
+  // Rebuild ALL_USED_ROUTE_IDS
+  ALL_USED_ROUTE_IDS.clear();
+  for (const id of TAKEOFF_USED_ROUTE_IDS) ALL_USED_ROUTE_IDS.add(id);
+  for (const a of PARKING_ASSIGNMENTS) {
+    if (a.routeId >= 0) ALL_USED_ROUTE_IDS.add(a.routeId);
+  }
+
+  // Rebuild NON_TAKEOFF_LINKS
+  NON_TAKEOFF_LINKS.length = 0;
+  const seen = new Set();
+  for (const a of PARKING_ASSIGNMENTS) {
+    if (a.routeId < 0 || TAKEOFF_USED_ROUTE_IDS.has(a.routeId)) continue;
+    const key = `${a.memberId}:${a.routeId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    NON_TAKEOFF_LINKS.push(a);
+  }
+}

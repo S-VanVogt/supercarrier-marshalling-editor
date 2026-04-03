@@ -88,6 +88,16 @@ export class Renderer {
     ctx.textBaseline = 'bottom';
     ctx.fillText('(c) 2026 by VanVogt', W - 8, H - 6);
 
+    // Validation warning (set externally)
+    if (this.validationWarning) {
+      ctx.fillStyle = this.validationWarningLevel === 'warning'
+        ? 'rgba(200,140,40,0.85)' : 'rgba(192,57,43,0.85)';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(this.validationWarning, 8, H - 6);
+    }
+
     ctx.restore();
   }
 
