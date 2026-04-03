@@ -13,6 +13,7 @@ import { replaceTaskData, TAKEOFF_TASKS, PARKING_TASKS } from './takeoff-tasks-d
 import { patchCrewLua, downloadPatchedCrewLua } from './crew-lua-patcher.js';
 import { parseCatapultCrew } from './crew-lua-parser.js';
 import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs, replaceCatapultCrews } from './catapult-crew-data.js';
+import { validateTakeoffTasks } from './takeoff-validation.js';
 
 export class UI {
   /** @param {import('./viewport.js').Viewport} viewport  @param {import('./renderer.js').Renderer} renderer  @param {import('./route-state.js').RouteState} routeState */
@@ -281,6 +282,7 @@ export class UI {
     // Export Crew
     document.getElementById('btn-export-crew').addEventListener('click', () => {
       if (!this._originalCrewLuaText) { alert('crew.lua not imported yet.'); return; }
+      if (!this._confirmTakeoffValidation()) return;
       this._enforceAllCatCrewHide();
       const headerComment = document.getElementById('crew-header-comment').value.trim();
       downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment, TAKEOFF_TASKS);
@@ -350,6 +352,7 @@ export class UI {
     });
 
     document.getElementById('btn-export-stamp-apply').addEventListener('click', () => {
+      if (this._originalCrewLuaText && !this._confirmTakeoffValidation()) return;
       const ver = document.getElementById('export-stamp-ver').value.trim();
       const notes = document.getElementById('export-stamp-notes').value.trim();
       const lv = this.rs.loadedVariant;
@@ -853,6 +856,7 @@ export class UI {
 
     // Trigger redraw
     this.rs._notify();
+    this._syncTakeoffValidationWarning();
 
     console.log(`Imported crew.lua: ${data.members.length} members, ${data.routes.length} routes, ${data.takeoffTasks.length} takeoff tasks, ${data.parkingTasks.length} parking tasks`);
   }
@@ -1131,6 +1135,10 @@ export class UI {
       brownCrewBox.classList.remove('static-brown');
       brownCrewBox.style.cursor = 'default';
       if (this._assignMode && this._assignIsBrown) brownCrewBox.classList.add('assigning');
+      if (isTakeoff && (task.brownRouteId < 0 || task.brownRouteId > 15)) {
+        brownCrewBox.classList.add('invalid');
+        brownCrewBox.title = `brown_route_id = ${task.brownRouteId} out of range (0–15)`;
+      }
       // Right-click to enter assign mode
       brownCrewBox.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -1149,6 +1157,12 @@ export class UI {
       box.dataset.stepIdx = si;
       if (si === this._selectedHandoff) box.classList.add('selected');
       if (this._assignMode && !this._assignIsBrown && this._assignStepIdx === si) box.classList.add('assigning');
+      if (isTakeoff && (step.routeId === -1 || step.routeId === 0)) {
+        box.classList.add('invalid');
+        box.title = step.routeId === 0
+          ? 'route_id = 0 (Lua 1-based: routes[0] = nil, will crash DCS)'
+          : 'route_id = -1 not allowed in takeoff tasks';
+      }
 
       // Click to select + drag
       box.addEventListener('mousedown', (e) => {
@@ -1225,6 +1239,7 @@ export class UI {
 
     // Update crew list highlights to match current selection
     this._syncCrewHighlights();
+    this._syncTakeoffValidationWarning();
   }
 
   _makeCrewBox(routeId, memberId, memberColor, isStatic) {
@@ -1324,8 +1339,9 @@ export class UI {
       newProgress = Math.round(bestMid * 1000) / 1000;
     }
 
-    // Default to first available member (memberId 0) and no route
-    const newStep = { progress: newProgress, memberId: 0, routeId: -1 };
+    // Default to memberId 0; for takeoff tasks use routeId 1 (valid), parking uses -1 (idle)
+    const isTakeoff = this.rs.selectedRouteType === 'takeoff';
+    const newStep = { progress: newProgress, memberId: 0, routeId: isTakeoff ? 1 : -1 };
     steps.push(newStep);
     // Keep steps sorted by progress
     steps.sort((a, b) => a.progress - b.progress);
@@ -1353,10 +1369,27 @@ export class UI {
     const task = this._currentTask();
     if (!task || this._selectedHandoff < 0 || this._selectedHandoff >= task.steps.length) return;
     const step = task.steps[this._selectedHandoff];
+    const isTakeoff = this.rs.selectedRouteType === 'takeoff';
     step.memberId = 0;
-    step.routeId = -1;
+    step.routeId = isTakeoff ? 1 : -1;
     this._syncTaskRow();
     this._update();
+  }
+
+  _confirmTakeoffValidation() {
+    const errors = validateTakeoffTasks(TAKEOFF_TASKS);
+    if (errors.length === 0) return true;
+    const msg = errors.map(e => `Task ${e.taskIdx + 1}: ${e.message}`).join('\n');
+    return confirm(`WARNING: Invalid takeoff task data will crash DCS:\n\n${msg}\n\nExport anyway?`);
+  }
+
+  _syncTakeoffValidationWarning() {
+    const warn = document.getElementById('takeoff-validation-warning');
+    if (!warn) return;
+    const errors = validateTakeoffTasks(TAKEOFF_TASKS);
+    if (errors.length === 0) { warn.style.display = 'none'; return; }
+    warn.style.display = '';
+    warn.textContent = 'Warning: ' + errors.map(e => `Task ${e.taskIdx + 1} ${e.message}`).join('; ');
   }
 
   /** Nudge overlapping positions so boxes don't stack. Returns adjusted 0-1 values for display. */
