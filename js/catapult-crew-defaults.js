@@ -275,8 +275,8 @@ export const DEFAULT_CATAPULT_CREWS = [
       ],
     },
     { name: "white2",
-      position: { x: -60.723262786865, y: -37.072975158691, hdg: -45.0 },
-      fastStartPosition: { x: -60.722999572754, y: -37.073001861572, hdg: -45.0 },
+      position: { x: -60.723262786865, h: 18.837890625, y: -37.072975158691, hdg: -45.0 },
+      fastStartPosition: { x: -60.722999572754, h: 18.837999343872, y: -37.073001861572, hdg: -45.0 },
       angles: [],
       livery: "white", modelName: "carrier_tech_usa",
       routes: [

@@ -1368,6 +1368,35 @@ export class Renderer {
       ctx.stroke();
     }
 
+    // Circles around crew targets in task edit mode
+    if (taskEdit) {
+      const selIdx = (rs.selectedHandoff != null) ? rs.selectedHandoff : -1;
+      const assignIdx = rs.assignMode ? rs.assignStepIdx : -999;
+      const assignBrown = rs.assignMode && rs.assignIsBrown;
+      const circleR = 12;
+
+      const isBlue = (stepIdx, isBrown) => {
+        if (isBrown) return assignBrown;
+        return stepIdx === selIdx || stepIdx === assignIdx;
+      };
+
+      const drawCircle = (tgt, blue) => {
+        if (!tgt) return;
+        const c = this.wc(tgt.x, tgt.y);
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, circleR, 0, Math.PI * 2);
+        ctx.strokeStyle = blue ? 'rgba(60,130,240,0.9)' : 'rgba(150,150,150,0.5)';
+        ctx.lineWidth = blue ? 2.5 : 1.5;
+        ctx.stroke();
+      };
+
+      // Step crew circles
+      for (let i = 0; i < task.steps.length; i++) {
+        const step = task.steps[i];
+        drawCircle(this._parkingTarget(step), isBlue(i, false));
+      }
+    }
+
     ctx.restore();
   }
 

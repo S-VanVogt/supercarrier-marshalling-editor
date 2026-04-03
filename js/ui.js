@@ -13,6 +13,7 @@ import { replaceTaskData, refreshTaskDerivedData, TAKEOFF_TASKS, PARKING_TASKS }
 import { patchCrewLua, downloadPatchedCrewLua, buildPatchedCrewLua } from './crew-lua-patcher.js';
 import { parseCatapultCrew } from './crew-lua-parser.js';
 import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs, replaceCatapultCrews } from './catapult-crew-data.js';
+import { DEFAULT_CATAPULT_CREWS } from './catapult-crew-defaults.js';
 import { validateTakeoffTasks } from './takeoff-validation.js';
 import * as CS from './config-store.js';
 
@@ -289,7 +290,7 @@ export class UI {
       if (!this._confirmTakeoffValidation()) return;
       this._enforceAllCatCrewHide();
       const headerComment = document.getElementById('crew-header-comment').value.trim();
-      downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment, TAKEOFF_TASKS);
+      downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment, TAKEOFF_TASKS, PARKING_TASKS);
     });
 
     // ── Config I/O (folder-based) ──────────────────────────────────────
@@ -341,6 +342,7 @@ export class UI {
       if (!this._originalLuaText && !this._originalCrewLuaText) {
         alert('No files loaded yet.'); return;
       }
+      this._pendingSaveConfig = null; // ensure download path, not SC-Configs save
       const form = document.getElementById('export-stamp-form');
       const verInput = document.getElementById('export-stamp-ver');
       // Pre-fill version from loaded variant (auto-increment)
@@ -355,7 +357,7 @@ export class UI {
       form.style.display = '';
     });
 
-    document.getElementById('btn-export-stamp-apply').addEventListener('click', () => {
+    document.getElementById('btn-export-stamp-apply').addEventListener('click', async () => {
       if (this._originalCrewLuaText && !this._confirmTakeoffValidation()) return;
       const ver = document.getElementById('export-stamp-ver').value.trim();
       const notes = document.getElementById('export-stamp-notes').value.trim();
@@ -365,12 +367,45 @@ export class UI {
       let stamp = `-- [SC-Config] ${name} ${ver}\n`;
       stamp += `-- [SC-Config] Modified: ${date}\n`;
       if (notes) stamp += `-- [SC-Config] Notes: ${notes}\n`;
-      if (this._originalLuaText) {
-        downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp, this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
-      }
-      if (this._originalCrewLuaText) {
-        this._enforceAllCatCrewHide();
-        downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS);
+
+      const saveConfig = this._pendingSaveConfig;
+      this._pendingSaveConfig = null;
+
+      if (saveConfig) {
+        // SC-Configs Save path — write to folder
+        if (!CS.hasRoot()) {
+          const ok = await CS.restoreRootFolder(true);
+          if (!ok) { alert('Permission denied. Please re-select the SC-Configs folder.'); return; }
+        }
+        try {
+          if (this._originalLuaText) {
+            const patched = buildPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp,
+              this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
+            await CS.writeConfigFile(saveConfig, 'USS_Nimitz_RunwaysAndRoutes.lua', patched);
+          }
+          if (this._originalCrewLuaText) {
+            this._enforceAllCatCrewHide();
+            const patched = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
+              CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS);
+            await CS.writeConfigFile(saveConfig, 'crew.lua', patched);
+          }
+          const saved = [this._originalLuaText && 'RunwaysAndRoutes', this._originalCrewLuaText && 'crew.lua'].filter(Boolean).join(' + ');
+          console.log(`Config saved to ${saveConfig}: ${saved}`);
+          const saveBtn = document.getElementById('btn-save-config');
+          saveBtn.textContent = '✓ Saved';
+          setTimeout(() => { saveBtn.textContent = 'Save'; }, 1500);
+        } catch (err) {
+          alert('Failed to save config: ' + err.message);
+        }
+      } else {
+        // Download path — export as file downloads
+        if (this._originalLuaText) {
+          downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp, this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
+        }
+        if (this._originalCrewLuaText) {
+          this._enforceAllCatCrewHide();
+          downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS);
+        }
       }
       // Update loaded variant and save notes for next export
       this.rs.loadedVariant = { name, version: ver };
@@ -380,6 +415,7 @@ export class UI {
     });
 
     document.getElementById('btn-export-stamp-cancel').addEventListener('click', () => {
+      this._pendingSaveConfig = null;
       document.getElementById('export-stamp-form').style.display = 'none';
     });
 
@@ -909,47 +945,26 @@ export class UI {
       }
     });
 
-    // Save button — writes directly to the selected config folder
-    saveBtn.addEventListener('click', async () => {
+    // Save button — opens stamp form then writes to selected config folder
+    saveBtn.addEventListener('click', () => {
       const name = select.value;
       if (!name) return;
       if (!this._originalLuaText && !this._originalCrewLuaText) {
         alert('No files loaded yet.'); return;
       }
-      // Re-request permission if needed
-      if (!CS.hasRoot()) {
-        const ok = await CS.restoreRootFolder(true);
-        if (!ok) { alert('Permission denied. Please re-select the SC-Configs folder.'); return; }
-      }
-      // Validate takeoff tasks before saving
-      if (this._originalCrewLuaText && !this._confirmTakeoffValidation()) return;
-      // Build stamp
+      // Show stamp form — _pendingSaveConfig tells Apply handler to save to SC-Configs
+      this._pendingSaveConfig = name;
+      const form = document.getElementById('export-stamp-form');
+      const verInput = document.getElementById('export-stamp-ver');
       const lv = this.rs.loadedVariant;
-      const ver = lv && lv.version ? lv.version : '';
-      const configName = lv ? lv.name : name;
-      const date = new Date().toISOString().slice(0, 10);
-      let stamp = `-- [SC-Config] ${configName} ${ver}\n`;
-      stamp += `-- [SC-Config] Modified: ${date}\n`;
-      try {
-        if (this._originalLuaText) {
-          const patched = buildPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp,
-            this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
-          await CS.writeConfigFile(name, 'USS_Nimitz_RunwaysAndRoutes.lua', patched);
-        }
-        if (this._originalCrewLuaText) {
-          this._enforceAllCatCrewHide();
-          const patched = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
-            CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS);
-          await CS.writeConfigFile(name, 'crew.lua', patched);
-        }
-        const saved = [this._originalLuaText && 'RunwaysAndRoutes', this._originalCrewLuaText && 'crew.lua'].filter(Boolean).join(' + ');
-        console.log(`Config saved to ${name}: ${saved}`);
-        // Brief visual feedback
-        saveBtn.textContent = '✓ Saved';
-        setTimeout(() => { saveBtn.textContent = 'Save'; }, 1500);
-      } catch (err) {
-        alert('Failed to save config: ' + err.message);
+      if (lv && lv.version) {
+        const m = lv.version.match(/^(v\d+\.)(\d+)$/);
+        verInput.value = m ? m[1] + (parseInt(m[2]) + 1) : lv.version;
+      } else {
+        verInput.value = 'v0.1';
       }
+      document.getElementById('export-stamp-notes').value = this._lastStampNotes || '';
+      form.style.display = '';
     });
   }
 
@@ -2567,17 +2582,26 @@ export class UI {
     const DECK_H = 20.1494140625;
     const SEA_H = 0.0123;
     const hidden = this._catCrewHidden[catIdx];
-    const h = hidden ? SEA_H : DECK_H;
     const crew = CATAPULT_CREWS[catIdx];
     if (!crew) return;
-    for (const member of crew.members) {
-      // Position and fast start position
-      member.position.h = h;
-      if (member.fastStartPosition) member.fastStartPosition.h = h;
-      // All route points
-      for (const route of member.routes) {
-        for (const pt of route.points) {
-          pt.h = h;
+    const defaults = DEFAULT_CATAPULT_CREWS[catIdx];
+    for (let mi = 0; mi < crew.members.length; mi++) {
+      const member = crew.members[mi];
+      const defMember = defaults?.members[mi];
+      if (hidden) {
+        member.position.h = SEA_H;
+        if (member.fastStartPosition) member.fastStartPosition.h = SEA_H;
+        for (const route of member.routes) {
+          for (const pt of route.points) pt.h = SEA_H;
+        }
+      } else {
+        // Restore original h per member (cat4 white2 uses a lower altitude)
+        member.position.h = defMember?.position?.h ?? DECK_H;
+        if (member.fastStartPosition) {
+          member.fastStartPosition.h = defMember?.fastStartPosition?.h ?? DECK_H;
+        }
+        for (const route of member.routes) {
+          for (const pt of route.points) pt.h = DECK_H;
         }
       }
     }

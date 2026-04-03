@@ -525,10 +525,76 @@ export function patchTakeoffTasks(lua, tasks) {
   return lua;
 }
 
+// ── Parking task patching ────────────────────────────────────────────────
+
+function findParkingTaskBlocks(lua) {
+  const tcIdx = lua.indexOf('["takeoff_crew"]');
+  if (tcIdx < 0) return [];
+  const ptKey = '["parking_tasks"]';
+  const ptIdx = lua.indexOf(ptKey, tcIdx);
+  if (ptIdx < 0) return [];
+  const ptOpen = lua.indexOf('{', ptIdx + ptKey.length);
+  const ptClose = findMatchingBrace(lua, ptOpen);
+  if (ptClose < 0) return [];
+
+  const section = lua.slice(ptOpen, ptClose + 1);
+  const blocks = [];
+  const entryRe = /\[(\d+)\]\s*=\s*\{/g;
+  let match;
+  while ((match = entryRe.exec(section)) !== null) {
+    const luaIdx = parseInt(match[1]);
+    const braceStart = ptOpen + match.index + match[0].length - 1;
+    const braceEnd = findMatchingBrace(lua, braceStart);
+    if (braceEnd < 0) continue;
+    blocks.push({
+      taskIdx: luaIdx - 1,
+      innerStart: braceStart + 1,
+      innerEnd: braceEnd,
+    });
+    entryRe.lastIndex = braceStart + (braceEnd - braceStart) + 1 - ptOpen;
+  }
+  return blocks;
+}
+
+function buildParkingTaskInner(task) {
+  const indent = '                ';
+  const lines = [];
+  for (let i = 0; i < task.steps.length; i++) {
+    const s = task.steps[i];
+    lines.push(`${indent}[${i + 1}] = {`);
+    lines.push(`${indent}    ["progress"] = ${s.progress},`);
+    lines.push(`${indent}    ["member_id"] = ${s.memberId},`);
+    lines.push(`${indent}    ["route_id"] = ${s.routeId},`);
+    lines.push(`${indent}},`);
+  }
+  return '\n' + lines.join('\n') + '\n            ';
+}
+
+export function patchParkingTasks(lua, tasks) {
+  const blocks = findParkingTaskBlocks(lua);
+  if (blocks.length === 0) return lua;
+
+  const patches = [];
+  for (const block of blocks) {
+    if (block.taskIdx < 0 || block.taskIdx >= tasks.length) continue;
+    patches.push({
+      start: block.innerStart,
+      end: block.innerEnd,
+      replacement: buildParkingTaskInner(tasks[block.taskIdx]),
+    });
+  }
+
+  patches.sort((a, b) => b.start - a.start);
+  for (const p of patches) {
+    lua = lua.slice(0, p.start) + p.replacement + lua.slice(p.end);
+  }
+  return lua;
+}
+
 /**
  * Build the fully patched crew.lua string (no download).
  */
-export function buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks) {
+export function buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks, parkingTasks) {
   let patched = patchCrewLua(originalText, members, routes, headerComment);
   if (catapultCrews && catapultCrews.length > 0) {
     patched = patchCatCrewLua(patched, catapultCrews, originalCatCrews);
@@ -536,14 +602,17 @@ export function buildPatchedCrewLua(originalText, members, routes, catapultCrews
   if (takeoffTasks && takeoffTasks.length > 0) {
     patched = patchTakeoffTasks(patched, takeoffTasks);
   }
+  if (parkingTasks && parkingTasks.length > 0) {
+    patched = patchParkingTasks(patched, parkingTasks);
+  }
   return patched;
 }
 
 /**
  * Download patched crew.lua as a file (includes deck crew, catapult crew, and task edits).
  */
-export function downloadPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks) {
-  const patched = buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks);
+export function downloadPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks, parkingTasks) {
+  const patched = buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks, parkingTasks);
   const blob = new Blob([patched], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
