@@ -64,6 +64,33 @@ export class UI {
 
   // ── Event wiring ────────────────────────────────────────────────────────
   _bindEvents() {
+    // Undo / Redo
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        // Don't intercept if focused on an input/textarea
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        e.preventDefault();
+        if (this.rs.undo()) {
+          this._rebuildAllUI();
+          this._update();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'Z' || (e.key === 'z' && e.shiftKey)) ) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        e.preventDefault();
+        if (this.rs.redo()) {
+          this._rebuildAllUI();
+          this._update();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        e.preventDefault();
+        if (this.rs.redo()) {
+          this._rebuildAllUI();
+          this._update();
+        }
+      }
+    });
+
     // Slider
     this.slider.addEventListener('input', () => {
       this.rs.setT(this.slider.value / 100);
@@ -252,6 +279,7 @@ export class UI {
             const blockers = parseBlockerTerminals(text);
             if (blockers) this._loadBlockerTerminals(blockers);
             this._originalLuaText = text;
+            this.rs.clearUndoHistory();
             // Parse SC-Config stamp for version overlay
             const stamp = this._parseScConfigStamp(text);
             if (stamp) this.rs.loadedVariant = stamp;
@@ -397,6 +425,19 @@ export class UI {
           }
           const saved = [this._originalLuaText && 'RunwaysAndRoutes', this._originalCrewLuaText && 'crew.lua'].filter(Boolean).join(' + ');
           console.log(`Config saved to ${saveConfig}: ${saved}`);
+          // Reset baselines so "edited" flag clears
+          if (this._originalLuaText) {
+            this._originalLuaText = buildPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp,
+              this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
+            this.rs.refreshRouteSnapshots();
+          }
+          if (this._originalCrewLuaText) {
+            this._originalCrewLuaText = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
+              CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS);
+            this.rs.refreshCrewSnapshots();
+            this.rs.refreshCatCrewSnapshots();
+          }
+          this._update();
           const saveBtn = document.getElementById('btn-save-config');
           saveBtn.textContent = '✓ Saved';
           setTimeout(() => { saveBtn.textContent = 'Save'; }, 1500);
@@ -1071,6 +1112,7 @@ export class UI {
     }
 
     // Trigger redraw
+    this.rs.clearUndoHistory();
     this.rs._notify();
     this._syncTakeoffValidationWarning();
     this._syncCatCrewCanvasWarning();
@@ -1081,6 +1123,7 @@ export class UI {
   _switchRouteCatapult(routeIdx, newCat) {
     const route = this.rs.takeoffRoutes[routeIdx];
     if (route.runwayIdx === newCat) return;
+    this.rs.pushUndo();
     const tail = CAT_TAIL_POINTS[newCat];
     const pts = route.points;
     // Replace last 3 points with the new catapult's approach
@@ -1091,6 +1134,17 @@ export class UI {
     route.label = route.label.replace(/Cat \d/, `Cat ${newCat}`);
     this._rebuildRouteList();
     this.rs._notify();
+  }
+
+  /** Full UI rebuild after undo/redo. */
+  _rebuildAllUI() {
+    this._rebuildRouteList();
+    this._rebuildCrewLists();
+    this._rebuildCatCrewList();
+    this._syncCatCrewPanel();
+    this._syncTaskRow();
+    this._syncTakeoffValidationWarning();
+    this._syncCatCrewCanvasWarning();
   }
 
   _rebuildRouteList() {
@@ -1207,6 +1261,7 @@ export class UI {
 
     // Assign mode: reassign and exit
     if (this._assignMode) {
+      this.rs.pushUndo();
       if (this._assignIsBrown) {
         if (type === 'idle') task.brownId = idx;
         else task.brownRouteId = idx;
@@ -1224,6 +1279,7 @@ export class UI {
 
     // Selected handoff: reassign member or route
     if (this._selectedHandoff >= 0 && this._selectedHandoff < task.steps.length) {
+      this.rs.pushUndo();
       const step = task.steps[this._selectedHandoff];
       if (type === 'idle') step.memberId = idx;
       else step.routeId = idx;
@@ -1393,6 +1449,7 @@ export class UI {
       // Click to select + drag
       box.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
+        this.rs.pushUndo('drag-handoff');
         this._selectedHandoff = si;
         this._draggingHandoff = true;
         this._dragTrack = track;
@@ -1424,6 +1481,7 @@ export class UI {
       input.addEventListener('change', () => {
         const v = parseFloat(input.value);
         if (!isNaN(v) && v >= 0 && v <= 1) {
+          this.rs.pushUndo();
           step.progress = v;
           this._syncTaskRow();
           this._update();
@@ -1437,6 +1495,7 @@ export class UI {
     upBtn.disabled = !step;
     if (step) {
       upBtn.addEventListener('click', () => {
+        this.rs.pushUndo();
         step.progress = Math.min(1, Math.round((step.progress + increment) * 1000) / 1000);
         this._syncTaskRow();
         this._update();
@@ -1449,6 +1508,7 @@ export class UI {
     downBtn.disabled = !step;
     if (step) {
       downBtn.addEventListener('click', () => {
+        this.rs.pushUndo();
         step.progress = Math.max(0, Math.round((step.progress - increment) * 1000) / 1000);
         this._syncTaskRow();
         this._update();
@@ -1530,6 +1590,7 @@ export class UI {
       routeId = -1;
     }
 
+    this.rs.pushUndo();
     if (this._assignIsBrown) {
       task.brownId = memberId;
       task.brownRouteId = routeId;
@@ -1551,6 +1612,7 @@ export class UI {
   _addTaskStep() {
     const task = this._currentTask();
     if (!task) return;
+    this.rs.pushUndo();
     const steps = task.steps;
 
     // Place new step at midpoint of largest gap, or at 0.5 if empty
@@ -1584,7 +1646,7 @@ export class UI {
   _deleteTaskStep() {
     const task = this._currentTask();
     if (!task || this._selectedHandoff < 0 || this._selectedHandoff >= task.steps.length) return;
-
+    this.rs.pushUndo();
     task.steps.splice(this._selectedHandoff, 1);
     // Adjust selection
     if (this._selectedHandoff >= task.steps.length) {
@@ -1598,6 +1660,7 @@ export class UI {
   _resetTaskStep() {
     const task = this._currentTask();
     if (!task || this._selectedHandoff < 0 || this._selectedHandoff >= task.steps.length) return;
+    this.rs.pushUndo();
     const step = task.steps[this._selectedHandoff];
     const isTakeoff = this.rs.selectedRouteType === 'takeoff';
     step.memberId = 0;
@@ -1689,6 +1752,7 @@ export class UI {
           inp.addEventListener('input', () => {
             const val = parseFloat(inp.value);
             if (isNaN(val)) return;
+            rs.pushUndo(`panel-crew-${mi}`);
             const k = inp.dataset.k;
             if (k === 'x') { m.x = val; rs._notify(); }
             else if (k === 'y') { m.y = val; rs._notify(); }
@@ -1724,6 +1788,7 @@ export class UI {
           inp.addEventListener('input', () => {
             const val = parseFloat(inp.value);
             if (isNaN(val)) return;
+            rs.pushUndo(`panel-route-${ri}`);
             const k = inp.dataset.k;
             if (k === 'x') { p.x = val; if (!r.points) r.x = val; rs._notify(); }
             else if (k === 'y') { p.y = val; if (!r.points) r.y = val; rs._notify(); }
@@ -2413,6 +2478,7 @@ export class UI {
           hdgInp.addEventListener('input', () => {
             const val = parseFloat(hdgInp.value);
             if (isNaN(val)) return;
+            this.rs.pushUndo('catcrew-hdg-input');
             catRoute.finalHeading = ((val + 180) % 360 + 360) % 360 - 180;
             this.rs._notify();
           });
@@ -2467,12 +2533,15 @@ export class UI {
           const idx = +inp.dataset.i;
           const key = inp.dataset.k;
           if (key === 'terminalSize') {
+            this.rs.pushUndo();
             route.terminalSize = val > 0 ? val : null;
             this.rs._notify();
           } else if (key === 'despawnTime') {
+            this.rs.pushUndo();
             route.despawnTime = val > 0 ? val : null;
             this.rs._notify();
           } else if (key === 'v') {
+            this.rs.pushUndo();
             route.points[idx].v = val;
             this.rs._notify();
           } else {

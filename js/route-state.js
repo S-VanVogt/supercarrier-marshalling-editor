@@ -6,6 +6,7 @@ import { TAKEOFF_ROUTES, LANDING_ROUTES } from './route-data.js';
 import { CREW_MEMBERS } from './crew-data.js';
 import { CREW_ROUTES } from './crew-routes-data.js';
 import { CATAPULT_CREWS, CATAPULT_PHASES, findPhaseRoute, recalcTangents } from './catapult-crew-data.js';
+import { TAKEOFF_TASKS, PARKING_TASKS } from './takeoff-tasks-data.js';
 
 function cloneRoutes(src) {
   return src.map(r => ({
@@ -94,6 +95,144 @@ class RouteState {
 
     /** @type {Set<() => void>} */
     this._listeners = new Set();
+
+    // ── Undo / Redo ─────────────────────────────────────────────────────
+    this._undoStack = [];
+    this._redoStack = [];
+    this._maxUndo = 80;
+    /** Tag for coalescing rapid edits (drag, scroll-wheel). */
+    this._undoCoalesceTag = null;
+    this._undoCoalesceTimer = null;
+  }
+
+  // ── Undo / Redo ─────────────────────────────────────────────────────────
+
+  /** Snapshot all editable data for undo. */
+  _snapshotData() {
+    return {
+      takeoffRoutes: this.takeoffRoutes.map(r => ({ ...r, points: r.points.map(p => ({ ...p })) })),
+      landingRoutes: this.landingRoutes.map(r => ({ ...r, points: r.points.map(p => ({ ...p })) })),
+      crewMembers: CREW_MEMBERS.map(m => ({ ...m })),
+      crewRoutes: CREW_ROUTES.map(r => {
+        const c = { ...r };
+        if (r.points) c.points = r.points.map(p => ({ ...p }));
+        return c;
+      }),
+      catCrews: CATAPULT_CREWS.map(c => ({
+        ...c,
+        members: c.members.map(m => ({
+          ...m,
+          position: { ...m.position },
+          fastStartPosition: m.fastStartPosition ? { ...m.fastStartPosition } : null,
+          routes: m.routes.map(rt => ({
+            ...rt,
+            points: rt.points.map(p => ({ ...p })),
+          })),
+        })),
+      })),
+      takeoffTasks: TAKEOFF_TASKS.map(t => ({
+        ...t,
+        steps: t.steps.map(s => ({ ...s })),
+      })),
+      parkingTasks: PARKING_TASKS.map(t => ({
+        ...t,
+        steps: t.steps.map(s => ({ ...s })),
+      })),
+    };
+  }
+
+  /** Restore all editable data from a snapshot. */
+  _restoreSnapshot(snap) {
+    // Takeoff routes
+    this.takeoffRoutes.length = 0;
+    snap.takeoffRoutes.forEach(r => this.takeoffRoutes.push({ ...r, points: r.points.map(p => ({ ...p })) }));
+    // Landing routes
+    this.landingRoutes.length = 0;
+    snap.landingRoutes.forEach(r => this.landingRoutes.push({ ...r, points: r.points.map(p => ({ ...p })) }));
+    // Crew members
+    snap.crewMembers.forEach((m, i) => Object.assign(CREW_MEMBERS[i], m));
+    // Crew routes
+    snap.crewRoutes.forEach((r, i) => {
+      Object.assign(CREW_ROUTES[i], r);
+      if (r.points) CREW_ROUTES[i].points = r.points.map(p => ({ ...p }));
+    });
+    // Catapult crews
+    snap.catCrews.forEach((c, ci) => {
+      if (!CATAPULT_CREWS[ci]) return;
+      c.members.forEach((m, mi) => {
+        const target = CATAPULT_CREWS[ci].members[mi];
+        if (!target) return;
+        Object.assign(target.position, m.position);
+        if (m.fastStartPosition && target.fastStartPosition) {
+          Object.assign(target.fastStartPosition, m.fastStartPosition);
+        }
+        target.routes = m.routes.map(rt => ({
+          ...rt,
+          points: rt.points.map(p => ({ ...p })),
+        }));
+      });
+    });
+    // Tasks
+    snap.takeoffTasks.forEach((t, i) => {
+      if (!TAKEOFF_TASKS[i]) return;
+      Object.assign(TAKEOFF_TASKS[i], { brownId: t.brownId, brownRouteId: t.brownRouteId });
+      TAKEOFF_TASKS[i].steps = t.steps.map(s => ({ ...s }));
+    });
+    snap.parkingTasks.forEach((t, i) => {
+      if (!PARKING_TASKS[i]) return;
+      PARKING_TASKS[i].steps = t.steps.map(s => ({ ...s }));
+    });
+  }
+
+  /**
+   * Push an undo snapshot before an edit.
+   * @param {string} [tag] - Coalesce tag. Rapid edits with the same tag
+   *   (within 500ms) share one undo entry.
+   */
+  pushUndo(tag = null) {
+    if (tag && tag === this._undoCoalesceTag) {
+      // Same tag within coalesce window — don't push, just extend timer
+      clearTimeout(this._undoCoalesceTimer);
+      this._undoCoalesceTimer = setTimeout(() => { this._undoCoalesceTag = null; }, 500);
+      return;
+    }
+    // New edit — push snapshot
+    this._undoStack.push(this._snapshotData());
+    if (this._undoStack.length > this._maxUndo) this._undoStack.shift();
+    this._redoStack.length = 0;  // clear redo on new edit
+    if (tag) {
+      this._undoCoalesceTag = tag;
+      clearTimeout(this._undoCoalesceTimer);
+      this._undoCoalesceTimer = setTimeout(() => { this._undoCoalesceTag = null; }, 500);
+    } else {
+      this._undoCoalesceTag = null;
+    }
+  }
+
+  /** Undo last edit. Returns true if something was undone. */
+  undo() {
+    if (this._undoStack.length === 0) return false;
+    this._redoStack.push(this._snapshotData());
+    this._restoreSnapshot(this._undoStack.pop());
+    this._undoCoalesceTag = null;
+    this._notify();
+    return true;
+  }
+
+  /** Redo last undone edit. Returns true if something was redone. */
+  redo() {
+    if (this._redoStack.length === 0) return false;
+    this._undoStack.push(this._snapshotData());
+    this._restoreSnapshot(this._redoStack.pop());
+    this._notify();
+    return true;
+  }
+
+  /** Clear undo/redo stacks (e.g., after import). */
+  clearUndoHistory() {
+    this._undoStack.length = 0;
+    this._redoStack.length = 0;
+    this._undoCoalesceTag = null;
   }
 
   onChange(fn) {
@@ -248,6 +387,7 @@ class RouteState {
   }
 
   moveCrewMember(idx, type, x, y, pointIdx = -1) {
+    this.pushUndo(`move-crew-${type}-${idx}-${pointIdx}`);
     if (type === 'idle') {
       const m = CREW_MEMBERS[idx];
       if (m) { m.x = x; m.y = y; this._notify(); }
@@ -274,6 +414,7 @@ class RouteState {
   }
 
   rotateCrewMember(idx, type, deltaDeg, pointIdx = -1) {
+    this.pushUndo(`rotate-crew-${type}-${idx}-${pointIdx}`);
     if (type === 'idle') {
       const m = CREW_MEMBERS[idx];
       if (m) {
@@ -357,6 +498,7 @@ class RouteState {
   }
 
   moveWaypoint(routeIdx, pointIdx, x, y) {
+    this.pushUndo(`move-wp-${routeIdx}-${pointIdx}`);
     const routes = this._selectedRoutes();
     if (!routes) return;
     const pt = routes[routeIdx]?.points[pointIdx];
@@ -368,6 +510,7 @@ class RouteState {
   }
 
   addWaypoint(routeIdx, afterIdx, x, y) {
+    this.pushUndo();
     const routes = this._selectedRoutes();
     if (!routes) return;
     const route = routes[routeIdx];
@@ -378,6 +521,7 @@ class RouteState {
   }
 
   removeWaypoint(routeIdx, pointIdx) {
+    this.pushUndo();
     const routes = this._selectedRoutes();
     if (!routes) return;
     const route = routes[routeIdx];
@@ -548,6 +692,7 @@ class RouteState {
   }
 
   moveCatCrewWaypoint(pointIdx, x, y) {
+    this.pushUndo(`move-catcrew-${this.catCrewCatapult}-${this.catCrewEditMember}-${pointIdx}`);
     const route = this.getCatCrewEditRoute();
     if (!route || !route.points[pointIdx]) return;
     route.points[pointIdx].x = x;
@@ -558,6 +703,7 @@ class RouteState {
   }
 
   addCatCrewWaypoint(afterIdx, x, y) {
+    this.pushUndo();
     const route = this.getCatCrewEditRoute();
     if (!route) return;
     const newIdx = afterIdx + 1;
@@ -569,6 +715,7 @@ class RouteState {
   }
 
   rotateCatCrewHeading(deltaDeg) {
+    this.pushUndo(`rotate-catcrew-${this.catCrewCatapult}-${this.catCrewEditMember}`);
     const member = this.getCatCrewEditMember();
     if (!member) return;
     const phase = CATAPULT_PHASES[this.catCrewPhase];
@@ -598,6 +745,7 @@ class RouteState {
   }
 
   removeCatCrewWaypoint(pointIdx) {
+    this.pushUndo();
     const route = this.getCatCrewEditRoute();
     if (!route || route.points.length <= 2) return;
     route.points.splice(pointIdx, 1);
