@@ -52,6 +52,8 @@ export class UI {
 
     // Catapult crew hide state (per cat, sets h to 0.0123 to sink crew below deck)
     this._catCrewHidden = [false, false, false, false];
+    // Catapult crew disable state (per cat, marks catapult as unavailable)
+    this._catCrewDisabled = [false, false, false, false];
 
     this._bindEvents();
     this._buildRoutePanels();
@@ -153,6 +155,10 @@ export class UI {
           && this.rs.hoveredCrewIdx === this.rs.selectedCrewIdx && this.rs.hoveredCrewType === this.rs.selectedCrewType) {
         const delta = e.deltaY < 0 ? 5 : -5;
         this.rs.rotateCrewMember(this.rs.hoveredCrewIdx, this.rs.hoveredCrewType, delta, this.rs.hoveredCrewPointIdx);
+      } else if (this.rs.catCrewEditMode && this.rs.catCrewEditMember >= 0) {
+        const delta = e.deltaY < 0 ? 5 : -5;
+        this.rs.rotateCatCrewHeading(delta);
+        this.renderList();
       } else {
         const w = this._canvasWorld(e);
         const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
@@ -504,6 +510,19 @@ export class UI {
       btn.addEventListener('click', () => {
         const catIdx = parseInt(btn.dataset.cat);
         this._catCrewHidden[catIdx] = !this._catCrewHidden[catIdx];
+        if (this._catCrewHidden[catIdx]) this._catCrewDisabled[catIdx] = false;
+        this._applyCatCrewHide(catIdx);
+        this._syncCatCrewPanel();
+        this._rebuildCatCrewList();
+        this._update();
+      });
+    });
+
+    document.querySelectorAll('.cat-disable-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const catIdx = parseInt(btn.dataset.cat);
+        this._catCrewDisabled[catIdx] = !this._catCrewDisabled[catIdx];
+        if (this._catCrewDisabled[catIdx]) this._catCrewHidden[catIdx] = false;
         this._applyCatCrewHide(catIdx);
         this._syncCatCrewPanel();
         this._rebuildCatCrewList();
@@ -1054,6 +1073,7 @@ export class UI {
     // Trigger redraw
     this.rs._notify();
     this._syncTakeoffValidationWarning();
+    this._syncCatCrewCanvasWarning();
 
     console.log(`Imported crew.lua: ${data.members.length} members, ${data.routes.length} routes, ${data.takeoffTasks.length} takeoff tasks, ${data.parkingTasks.length} parking tasks`);
   }
@@ -1085,6 +1105,7 @@ export class UI {
     const { errors } = validateTakeoffTasks(TAKEOFF_TASKS, PARKING_TASKS);
     const invalidTaskIndices = new Set(errors.map(e => e.taskIdx));
     this._syncTakeoffValidationWarning();
+    this._syncCatCrewCanvasWarning();
 
     // Takeoff panel
     const rows = document.querySelectorAll('#takeoff-route-list .route-row');
@@ -1445,6 +1466,7 @@ export class UI {
     // Update crew list highlights to match current selection
     this._syncCrewHighlights();
     this._syncTakeoffValidationWarning();
+    this._syncCatCrewCanvasWarning();
   }
 
   _makeCrewBox(routeId, memberId, memberColor, isStatic) {
@@ -2366,6 +2388,36 @@ export class UI {
           });
           this.ptRows.appendChild(row);
         });
+        // Heading row (finalHeading or computed from last segment)
+        if (catRoute.points.length >= 1) {
+          const pts = catRoute.points;
+          let effHdg;
+          if (catRoute.finalHeading != null) {
+            effHdg = catRoute.finalHeading;
+          } else if (pts.length >= 2) {
+            const prev = pts[pts.length - 2], last = pts[pts.length - 1];
+            effHdg = -Math.atan2(last.y - prev.y, last.x - prev.x) * 180 / Math.PI;
+          } else {
+            effHdg = member.position.hdg;
+          }
+          const hdgRow = document.createElement('div');
+          hdgRow.className = 'pt-row';
+          hdgRow.style.gridTemplateColumns = '28px 1fr 1fr 28px';
+          const hasExplicit = catRoute.finalHeading != null;
+          hdgRow.innerHTML = `
+            <span class="pt-idx" style="color:${hasExplicit ? '#333' : '#aaa'}">hdg</span>
+            <input type="number" value="${effHdg.toFixed(1)}" step="5" style="grid-column: 2 / 4">
+            <span></span>
+          `;
+          const hdgInp = hdgRow.querySelector('input');
+          hdgInp.addEventListener('input', () => {
+            const val = parseFloat(hdgInp.value);
+            if (isNaN(val)) return;
+            catRoute.finalHeading = ((val + 180) % 360 + 360) % 360 - 180;
+            this.rs._notify();
+          });
+          this.ptRows.appendChild(hdgRow);
+        }
         return;
       }
     }
@@ -2564,17 +2616,29 @@ export class UI {
       btn.classList.toggle('active', this._catCrewHidden[catIdx]);
       btn.textContent = this._catCrewHidden[catIdx] ? 'hidden' : 'hide';
     });
+    document.querySelectorAll('.cat-disable-btn').forEach(btn => {
+      const catIdx = parseInt(btn.dataset.cat);
+      btn.classList.toggle('active', this._catCrewDisabled[catIdx]);
+      btn.textContent = this._catCrewDisabled[catIdx] ? 'disabled' : 'disable';
+    });
     document.querySelectorAll('.phase-btn').forEach(btn => {
       btn.classList.toggle('active', parseInt(btn.dataset.phase) === this.rs.catCrewPhase);
     });
-    // Warning if any visible route leads to a hidden catapult
+    // Warning if any visible route leads to a hidden or disabled catapult
     const warn = document.getElementById('catcrew-warning');
     if (warn) {
-      const hasConflict = this.rs.takeoffRoutes.some((r, i) =>
-        this.rs.takeoffRouteVisible[i] && this._catCrewHidden[r.runwayIdx - 1]
-      );
-      warn.style.display = hasConflict ? '' : 'none';
+      const conflictCats = this._getCatCrewConflicts();
+      if (conflictCats.length > 0) {
+        const labels = conflictCats.map(c =>
+          `Cat ${c.cat} (${c.hidden ? 'hidden' : 'disabled'})`
+        );
+        warn.textContent = `Warning: routes lead to ${labels.join(', ')} — invalid config.`;
+        warn.style.display = '';
+      } else {
+        warn.style.display = 'none';
+      }
     }
+    this._syncCatCrewCanvasWarning();
   }
 
   /** Set all h values for a catapult's crew to deck height or sea level. */
@@ -2611,6 +2675,32 @@ export class UI {
   _enforceAllCatCrewHide() {
     for (let i = 0; i < 4; i++) {
       this._applyCatCrewHide(i);
+    }
+  }
+
+  /** Return list of catapults that have route conflicts (hidden or disabled with routes pointing to them). */
+  _getCatCrewConflicts() {
+    const conflicts = [];
+    for (let catIdx = 0; catIdx < 4; catIdx++) {
+      const hidden = this._catCrewHidden[catIdx];
+      const disabled = this._catCrewDisabled[catIdx];
+      if (!hidden && !disabled) continue;
+      const hasRoute = this.rs.takeoffRoutes.some((r, i) =>
+        this.rs.takeoffRouteVisible[i] && r.runwayIdx - 1 === catIdx
+      );
+      if (hasRoute) conflicts.push({ cat: catIdx + 1, hidden, disabled });
+    }
+    return conflicts;
+  }
+
+  /** Update canvas warning for hidden/disabled catapult conflicts. */
+  _syncCatCrewCanvasWarning() {
+    const conflicts = this._getCatCrewConflicts();
+    if (conflicts.length > 0) {
+      const labels = conflicts.map(c => `Cat ${c.cat} ${c.hidden ? 'hidden' : 'disabled'}`);
+      this.renderer.catCrewWarning = '\u26A0 ' + labels.join(', ') + ' — has takeoff routes';
+    } else {
+      this.renderer.catCrewWarning = null;
     }
   }
 

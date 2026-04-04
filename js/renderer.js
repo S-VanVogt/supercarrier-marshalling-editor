@@ -89,13 +89,23 @@ export class Renderer {
     ctx.fillText('(c) 2026 by VanVogt', W - 8, H - 6);
 
     // Validation warning (set externally)
+    let warnY = H - 6;
     if (this.validationWarning) {
       ctx.fillStyle = this.validationWarningLevel === 'warning'
         ? 'rgba(200,140,40,0.85)' : 'rgba(192,57,43,0.85)';
       ctx.font = 'bold 11px sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
-      ctx.fillText(this.validationWarning, 8, H - 6);
+      ctx.fillText(this.validationWarning, 8, warnY);
+      warnY -= 16;
+    }
+    // Cat crew conflict warning (set externally)
+    if (this.catCrewWarning) {
+      ctx.fillStyle = 'rgba(200,140,40,0.85)';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(this.catCrewWarning, 8, warnY);
     }
 
     ctx.restore();
@@ -1535,13 +1545,20 @@ export class Renderer {
           const last = pts[pts.length - 1];
           wx = last.x;
           wy = last.y;
-          hdg = route.finalHeading || member.position.hdg;
+          if (route.finalHeading != null) {
+            hdg = route.finalHeading;
+          } else if (pts.length >= 2) {
+            // No finalHeading — face walk direction (last segment)
+            const prev = pts[pts.length - 2];
+            hdg = -Math.atan2(last.y - prev.y, last.x - prev.x) * 180 / Math.PI;
+          } else {
+            hdg = member.position.hdg;
+          }
         } else if (t <= 0) {
-          // At start — face toward next point
+          // At start — face idle heading (pre-walk stance)
           wx = pts[0].x;
           wy = pts[0].y;
-          const dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y;
-          hdg = Math.atan2(dy, dx) * 180 / Math.PI;
+          hdg = member.position.hdg;
         } else {
           // Interpolate along waypoints by arc length
           const totalSegs = pts.length - 1;
@@ -1551,9 +1568,9 @@ export class Renderer {
           const a = pts[segIdx], b = pts[segIdx + 1];
           wx = a.x + (b.x - a.x) * segT;
           wy = a.y + (b.y - a.y) * segT;
-          // Face movement direction
+          // Face movement direction (negated to match DCS heading convention)
           const dx = b.x - a.x, dy = b.y - a.y;
-          hdg = Math.atan2(dy, dx) * 180 / Math.PI;
+          hdg = -Math.atan2(dy, dx) * 180 / Math.PI;
         }
       }
 

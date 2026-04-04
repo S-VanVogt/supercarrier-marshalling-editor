@@ -568,6 +568,35 @@ class RouteState {
     this._notify();
   }
 
+  rotateCatCrewHeading(deltaDeg) {
+    const member = this.getCatCrewEditMember();
+    if (!member) return;
+    const phase = CATAPULT_PHASES[this.catCrewPhase];
+    if (!phase.routeSuffix) {
+      // Idle / fast_start — rotate position.hdg or fastStartPosition.hdg
+      const pos = phase.useFastStart && member.fastStartPosition
+        ? member.fastStartPosition : member.position;
+      pos.hdg = ((pos.hdg + deltaDeg + 180) % 360 + 360) % 360 - 180;
+    } else {
+      // Route phase — rotate finalHeading
+      const route = findPhaseRoute(member, phase);
+      if (!route || route.points.length === 0) return;
+      const pts = route.points;
+      // Compute current effective heading
+      let cur;
+      if (route.finalHeading != null) {
+        cur = route.finalHeading;
+      } else if (pts.length >= 2) {
+        const prev = pts[pts.length - 2], last = pts[pts.length - 1];
+        cur = -Math.atan2(last.y - prev.y, last.x - prev.x) * 180 / Math.PI;
+      } else {
+        cur = member.position.hdg;
+      }
+      route.finalHeading = ((cur + deltaDeg + 180) % 360 + 360) % 360 - 180;
+    }
+    this._notify();
+  }
+
   removeCatCrewWaypoint(pointIdx) {
     const route = this.getCatCrewEditRoute();
     if (!route || route.points.length <= 2) return;

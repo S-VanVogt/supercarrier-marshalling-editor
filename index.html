@@ -26,13 +26,15 @@
   v0.1.47 — Takeoff task validation: block route_id=-1/0, brown_route_id>15, red invalid boxes, export gate
   v0.1.48 — Canvas validation warning, invalid route row highlighting, crew list rebuild on reassign
   v0.1.49 — Member >5 active routes soft warning (orange), refresh CREW_ACTIVE_LINKS on task mutation
+  v0.1.62 — Catapult crew heading: scroll-wheel rotation, finalHeading UI/export, walk-direction fallback
+  v0.1.62 — Catapult disable buttons (mutually exclusive with hide), canvas warning for hidden/disabled cats with routes
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.60</title>
+  <title>SuperCarrier Marshalling Editor v0.1.62</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -40,7 +42,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.60</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.62</h1>
       <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
     <canvas id="c" height="475"></canvas>
@@ -205,10 +207,10 @@
   <div class="tab-pane" id="panel-catapult-crew">
     <div class="panel-body">
       <div class="cat-selector">
-        <span class="cat-group"><button class="cat-btn active" data-cat="0">Cat 1</button><button class="cat-hide-btn" data-cat="0">hide</button></span>
-        <span class="cat-group"><button class="cat-btn" data-cat="1">Cat 2</button><button class="cat-hide-btn" data-cat="1">hide</button></span>
-        <span class="cat-group"><button class="cat-btn" data-cat="2">Cat 3</button><button class="cat-hide-btn" data-cat="2">hide</button></span>
-        <span class="cat-group"><button class="cat-btn" data-cat="3">Cat 4</button><button class="cat-hide-btn" data-cat="3">hide</button></span>
+        <span class="cat-group"><button class="cat-btn active" data-cat="0">Cat 1</button><span class="cat-action-row"><button class="cat-hide-btn" data-cat="0">hide</button><button class="cat-disable-btn" data-cat="0">disable</button></span></span>
+        <span class="cat-group"><button class="cat-btn" data-cat="1">Cat 2</button><span class="cat-action-row"><button class="cat-hide-btn" data-cat="1">hide</button><button class="cat-disable-btn" data-cat="1">disable</button></span></span>
+        <span class="cat-group"><button class="cat-btn" data-cat="2">Cat 3</button><span class="cat-action-row"><button class="cat-hide-btn" data-cat="2">hide</button><button class="cat-disable-btn" data-cat="2">disable</button></span></span>
+        <span class="cat-group"><button class="cat-btn" data-cat="3">Cat 4</button><span class="cat-action-row"><button class="cat-hide-btn" data-cat="3">hide</button><button class="cat-disable-btn" data-cat="3">disable</button></span></span>
       </div>
       <div class="phase-selector">
         <button class="phase-btn" data-phase="0">Idle</button>
@@ -224,7 +226,7 @@
         <span id="cat-crew-t-value" class="cat-slider-val">1.00</span>
       </div>
       <div class="route-list" id="catcrew-member-list"></div>
-      <div class="catcrew-warning" id="catcrew-warning" style="display:none">Warning: some routes lead to a hidden catapult crew — invalid config.</div>
+      <div class="catcrew-warning" id="catcrew-warning" style="display:none"></div>
     </div>
   </div>
 

@@ -914,12 +914,14 @@ button.needs-attention {
 .cat-btn.active { background: #1a1a18; color: #fff; border-color: #1a1a18; }
 .phase-btn.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
 .cat-group { display: flex; flex: 1; flex-direction: column; gap: 2px; }
-.cat-hide-btn {
-  font-size: 9px; padding: 1px 0; border: 0.5px solid #d3d1c7; border-radius: 4px;
+.cat-action-row { display: flex; gap: 2px; }
+.cat-hide-btn, .cat-disable-btn {
+  flex: 1; font-size: 9px; padding: 1px 0; border: 0.5px solid #d3d1c7; border-radius: 4px;
   background: #fff; color: #999; cursor: pointer; text-align: center; transition: background 0.15s;
 }
-.cat-hide-btn:hover { background: #f0efeb; }
+.cat-hide-btn:hover, .cat-disable-btn:hover { background: #f0efeb; }
 .cat-hide-btn.active { background: #f8d7da; color: #721c24; border-color: #d4a0a6; }
+.cat-disable-btn.active { background: #fff3cd; color: #856404; border-color: #d4b95c; }
 .catcrew-warning { font-size: 11px; color: #c0392b; padding: 3px 6px; width: 100%; }
 .takeoff-validation-warning { font-size: 11px; color: #c0392b; padding: 3px 6px; width: 100%; }
 .cat-slider-row {

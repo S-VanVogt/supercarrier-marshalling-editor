@@ -273,6 +273,8 @@ function findCatCrewRoutePointsBlocks(lua) {
           routeIdx: rtLuaIdx - 1,
           ptsStart: absPtsOpen + 1,   // after '{'
           ptsEnd: absPtsClose,        // the '}'
+          rtBraceStart,               // route block '{'
+          rtBraceEnd,                 // route block '}'
         });
 
         rtRe.lastIndex = rtBraceStart + (rtBraceEnd - rtBraceStart) + 1 - absRoutesOpen;
@@ -305,6 +307,10 @@ function buildCatCrewRoutePoints(points) {
  */
 function isCatRouteModified(orig, curr) {
   if (!orig || !curr) return true;
+  // Check finalHeading change
+  const origFH = orig.finalHeading ?? null;
+  const currFH = curr.finalHeading ?? null;
+  if (origFH !== currFH && !(origFH != null && currFH != null && Math.abs(origFH - currFH) < 0.01)) return true;
   if (orig.points.length !== curr.points.length) return true;
   return orig.points.some((p, j) =>
     p.x !== curr.points[j].x || p.y !== curr.points[j].y || p.h !== curr.points[j].h ||
@@ -400,6 +406,41 @@ export function patchCatCrewLua(lua, catapultCrews, originalCatCrews) {
 
     const replacement = buildCatCrewRoutePoints(route.points);
     patches.push({ start: block.ptsStart, end: block.ptsEnd, replacement });
+  }
+
+  // Patch finalHeading on catapult crew routes
+  for (const block of blocks) {
+    const crew = catapultCrews[block.catIdx];
+    if (!crew) continue;
+    const member = crew.members[block.memberIdx];
+    if (!member) continue;
+    const route = member.routes[block.routeIdx];
+    if (!route) continue;
+
+    const origCrew = originalCatCrews?.[block.catIdx];
+    const origMember = origCrew?.members[block.memberIdx];
+    const origRoute = origMember?.routes[block.routeIdx];
+    // Skip if finalHeading unchanged
+    const origFH = origRoute?.finalHeading ?? null;
+    const currFH = route.finalHeading ?? null;
+    if (origFH === currFH) continue;
+    if (origFH != null && currFH != null && Math.abs(origFH - currFH) < 0.01) continue;
+
+    const rtContent = lua.slice(block.rtBraceStart, block.rtBraceEnd + 1);
+    const fhRe = /\["final_heading"\]\s*=\s*[0-9eE.+\-]+,?/;
+    const fhMatch = fhRe.exec(rtContent);
+
+    if (currFH != null && fhMatch) {
+      // Replace existing final_heading value
+      const absStart = block.rtBraceStart + fhMatch.index;
+      const absEnd = absStart + fhMatch[0].length;
+      patches.push({ start: absStart, end: absEnd, replacement: `["final_heading"] = ${currFH},` });
+    } else if (currFH != null && !fhMatch) {
+      // Insert final_heading before closing brace of route block
+      const indent = '                            ';
+      patches.push({ start: block.rtBraceEnd, end: block.rtBraceEnd, replacement: `${indent}["final_heading"] = ${currFH},\n                        ` });
+    }
+    // If currFH is null and there was an original — leave as-is (don't remove)
   }
 
   // Patch position and fast_start_position heights
