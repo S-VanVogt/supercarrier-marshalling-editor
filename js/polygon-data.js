@@ -68,6 +68,21 @@ export function getDeck() {
   return _order.map(i => DECK_VERTICES[i]);
 }
 
+/** Test if a point (x, y) is inside the deck polygon (ray-casting algorithm). */
+export function pointOnDeck(x, y) {
+  const poly = getDeck();
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    if ((yi > y) !== (yj > y) &&
+        x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 /** Set a new draw order and save it. */
 export function setDrawOrder(indices) {
   _order = indices;

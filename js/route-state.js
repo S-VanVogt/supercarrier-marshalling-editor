@@ -7,6 +7,17 @@ import { CREW_MEMBERS } from './crew-data.js';
 import { CREW_ROUTES } from './crew-routes-data.js';
 import { CATAPULT_CREWS, CATAPULT_PHASES, findPhaseRoute, recalcTangents } from './catapult-crew-data.js';
 import { TAKEOFF_TASKS, PARKING_TASKS } from './takeoff-tasks-data.js';
+import { pointOnDeck } from './polygon-data.js';
+
+const DECK_H = 20.1494140625;
+const BALCONY_PORT_H = 18.837890625;
+const BALCONY_STBD_H = 18.6;
+
+/** Return correct height for a position: deck, port balcony, or starboard bow balcony. */
+function heightForPos(x, y) {
+  if (pointOnDeck(x, y)) return DECK_H;
+  return y < 0 ? BALCONY_STBD_H : BALCONY_PORT_H;
+}
 
 function cloneRoutes(src) {
   return src.map(r => ({
@@ -697,6 +708,7 @@ class RouteState {
     if (!route || !route.points[pointIdx]) return;
     route.points[pointIdx].x = x;
     route.points[pointIdx].y = y;
+    route.points[pointIdx].h = heightForPos(x, y);
     // Only recalc tangent for the moved point — preserve neighbors' original tangents
     recalcTangents(route.points, [pointIdx]);
     this._notify();
@@ -707,7 +719,7 @@ class RouteState {
     const route = this.getCatCrewEditRoute();
     if (!route) return;
     const newIdx = afterIdx + 1;
-    const h = route.points[afterIdx]?.h ?? 20.1494140625;
+    const h = heightForPos(x, y);
     route.points.splice(newIdx, 0, { x, h, y, vx: 0, vy: 0, vz: 0 });
     // Only recalc tangent for the new point — preserve existing points' original tangents
     recalcTangents(route.points, [newIdx]);

@@ -16,6 +16,7 @@ import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute
 import { DEFAULT_CATAPULT_CREWS } from './catapult-crew-defaults.js';
 import { validateTakeoffTasks } from './takeoff-validation.js';
 import * as CS from './config-store.js';
+import { pointOnDeck } from './polygon-data.js';
 
 export class UI {
   /** @param {import('./viewport.js').Viewport} viewport  @param {import('./renderer.js').Renderer} renderer  @param {import('./route-state.js').RouteState} routeState */
@@ -422,6 +423,12 @@ export class UI {
             const patched = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
               CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS);
             await CS.writeConfigFile(saveConfig, 'crew.lua', patched);
+          }
+          // Patch GroundCrew.lua with disable state
+          if (this._originalGroundCrewText) {
+            const gcPatched = this._patchGroundCrewDisable(this._originalGroundCrewText);
+            await CS.writeConfigFile(saveConfig, 'GroundCrew.lua', gcPatched);
+            this._originalGroundCrewText = gcPatched;
           }
           const saved = [this._originalLuaText && 'RunwaysAndRoutes', this._originalCrewLuaText && 'crew.lua'].filter(Boolean).join(' + ');
           console.log(`Config saved to ${saveConfig}: ${saved}`);
@@ -977,6 +984,7 @@ export class UI {
         }
         const rrText = await CS.readConfigFile(name, 'USS_Nimitz_RunwaysAndRoutes.lua');
         const crewText = await CS.readConfigFile(name, 'crew.lua');
+        const gcText = await CS.readConfigFile(name, 'GroundCrew.lua').catch(() => null);
         if (!rrText && !crewText) { alert('No .lua files found in ' + name); return; }
         if (rrText) {
           const routes = parseTakeoffRoutes(rrText);
@@ -995,6 +1003,19 @@ export class UI {
         if (crewText) {
           this._importCrewLua(crewText);
         }
+        // Detect disabled catapults from GroundCrew.lua behavior paths
+        this._catCrewDisabled = [false, false, false, false];
+        if (gcText) {
+          this._originalGroundCrewText = gcText;
+          const disabledRe = /crew\[(\d)\]\.behavior\s*=\s*'[^']*common_disabled\.xml'/g;
+          let m;
+          while ((m = disabledRe.exec(gcText)) !== null) {
+            const catIdx = parseInt(m[1]) - 1;  // crew[1] → index 0
+            if (catIdx >= 0 && catIdx < 4) this._catCrewDisabled[catIdx] = true;
+          }
+        }
+        this._syncCatCrewPanel();
+        this._syncCatCrewCanvasWarning();
         this.rs.refreshRouteSnapshots();
         this.rs._notify();
         CS.setActiveConfig(name);
@@ -2728,13 +2749,16 @@ export class UI {
           for (const pt of route.points) pt.h = SEA_H;
         }
       } else {
-        // Restore original h per member (cat4 white2 uses a lower altitude)
-        member.position.h = defMember?.position?.h ?? DECK_H;
+        // Restore h based on deck polygon (port or starboard balcony if off-deck)
+        const BALCONY_PORT_H = 18.837890625;
+        const BALCONY_STBD_H = 18.6;
+        const hFor = (x, y) => pointOnDeck(x, y) ? DECK_H : (y < 0 ? BALCONY_STBD_H : BALCONY_PORT_H);
+        member.position.h = hFor(member.position.x, member.position.y);
         if (member.fastStartPosition) {
-          member.fastStartPosition.h = defMember?.fastStartPosition?.h ?? DECK_H;
+          member.fastStartPosition.h = hFor(member.fastStartPosition.x, member.fastStartPosition.y);
         }
         for (const route of member.routes) {
-          for (const pt of route.points) pt.h = DECK_H;
+          for (const pt of route.points) pt.h = hFor(pt.x, pt.y);
         }
       }
     }
@@ -2745,6 +2769,22 @@ export class UI {
     for (let i = 0; i < 4; i++) {
       this._applyCatCrewHide(i);
     }
+  }
+
+  /** Patch GroundCrew.lua behavior paths based on disable state. */
+  _patchGroundCrewDisable(text) {
+    let result = text;
+    for (let i = 0; i < 4; i++) {
+      const catNum = i + 1;
+      const re = new RegExp(
+        `(crew\\[${catNum}\\]\\.behavior\\s*=\\s*')([^']*)(')`,
+      );
+      const newPath = this._catCrewDisabled[i]
+        ? './CoreMods/tech/USS_Nimitz/scripts/common_disabled.xml'
+        : './CoreMods/tech/USS_Nimitz/scripts/common.xml';
+      result = result.replace(re, `$1${newPath}$3`);
+    }
+    return result;
   }
 
   /** Return list of catapults that have route conflicts (hidden or disabled with routes pointing to them). */

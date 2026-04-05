@@ -26,17 +26,19 @@
   v0.1.47 — Takeoff task validation: block route_id=-1/0, brown_route_id>15, red invalid boxes, export gate
   v0.1.48 — Canvas validation warning, invalid route row highlighting, crew list rebuild on reassign
   v0.1.49 — Member >5 active routes soft warning (orange), refresh CREW_ACTIVE_LINKS on task mutation
-  v0.1.64 — Catapult crew heading: scroll-wheel rotation, finalHeading UI/export, walk-direction fallback
-  v0.1.64 — Catapult disable buttons (mutually exclusive with hide), canvas warning for hidden/disabled cats with routes
-  v0.1.64 — Clear "edited" flag after saving config (refresh all baselines)
-  v0.1.64 — Undo/redo (Ctrl-Z / Ctrl-Shift-Z / Ctrl-Y) for all edits with drag/scroll coalescing
+  v0.1.66 — Catapult crew heading: scroll-wheel rotation, finalHeading UI/export, walk-direction fallback
+  v0.1.66 — Catapult disable buttons (mutually exclusive with hide), canvas warning for hidden/disabled cats with routes
+  v0.1.66 — Clear "edited" flag after saving config (refresh all baselines)
+  v0.1.66 — Undo/redo (Ctrl-Z / Ctrl-Shift-Z / Ctrl-Y) for all edits with drag/scroll coalescing
+  v0.1.66 — Auto deck/balcony height for off-deck crew, parse/save GroundCrew.lua disable state
+  v0.1.66 — Split port/starboard balcony heights (18.838 port, 18.6 starboard bow)
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.64</title>
+  <title>SuperCarrier Marshalling Editor v0.1.66</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -44,7 +46,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.64</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.66</h1>
       <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
     <canvas id="c" height="475"></canvas>
