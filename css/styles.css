@@ -202,6 +202,10 @@ canvas {
   margin: 0 40px;
   opacity: 0.5;
   transition: opacity 0.15s;
+  touch-action: none;
+  /* Enlarge touch target without changing visual size */
+  padding: 10px 0;
+  background-clip: content-box;
 }
 .canvas-resize-handle:hover {
   opacity: 1;
@@ -338,6 +342,7 @@ button:hover { background: #f1efe8; }
   line-height: 13px;
   user-select: none;
   top: 2px;
+  touch-action: none;
 }
 .task-crew-box::before {
   content: '';
@@ -930,3 +935,10 @@ button.needs-attention {
 .cat-slider-row input[type="range"] { flex: 1; }
 .cat-slider-label { font-size: 11px; white-space: nowrap; }
 .cat-slider-val { font-size: 11px; min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── Mobile ─────────────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .banner-header { flex-wrap: wrap; }
+  .banner-header .hint { display: none; }
+  .canvas-resize-handle { opacity: 0.8; }
+}

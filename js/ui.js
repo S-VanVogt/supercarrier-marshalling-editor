@@ -17,6 +17,7 @@ import { DEFAULT_CATAPULT_CREWS } from './catapult-crew-defaults.js';
 import { validateTakeoffTasks } from './takeoff-validation.js';
 import * as CS from './config-store.js';
 import { pointOnDeck } from './polygon-data.js';
+import { heightForPos } from './route-state.js';
 
 export class UI {
   /** @param {import('./viewport.js').Viewport} viewport  @param {import('./renderer.js').Renderer} renderer  @param {import('./route-state.js').RouteState} routeState */
@@ -203,7 +204,7 @@ export class UI {
     document.getElementById('btn-task-delete').addEventListener('click', () => this._deleteTaskStep());
     document.getElementById('btn-task-reset').addEventListener('click', () => this._resetTaskStep());
     // Click track background to deselect handoff
-    document.getElementById('task-handoff-track').addEventListener('mousedown', (e) => {
+    document.getElementById('task-handoff-track').addEventListener('pointerdown', (e) => {
       if (e.target === e.currentTarget && this._selectedHandoff >= 0) {
         this._selectedHandoff = -1;
         this._syncTaskRow();
@@ -223,14 +224,14 @@ export class UI {
       this.renderList();
     });
     // Click progress area background to deselect crew in combined mode
-    document.getElementById('progress-bar').addEventListener('mousedown', (e) => {
+    document.getElementById('progress-bar').addEventListener('pointerdown', (e) => {
       if (e.target === e.currentTarget && this.rs.crewEditMode && this.rs.selectedRoute >= 0) {
         this.rs.exitCrewEdit();
       }
     });
 
     // Handoff box dragging (document-level)
-    document.addEventListener('mousemove', (e) => {
+    document.addEventListener('pointermove', (e) => {
       if (!this._draggingHandoff || !this._dragTrack) return;
       const rect = this._dragTrack.getBoundingClientRect();
       let progress = (e.clientX - rect.left) / rect.width;
@@ -248,7 +249,7 @@ export class UI {
         this._update();
       }
     });
-    document.addEventListener('mouseup', () => {
+    document.addEventListener('pointerup', () => {
       this._draggingHandoff = false;
       this._dragTrack = null;
     });
@@ -324,6 +325,7 @@ export class UI {
       if (!this._originalCrewLuaText) { alert('crew.lua not imported yet.'); return; }
       if (!this._confirmTakeoffValidation()) return;
       this._enforceAllCatCrewHide();
+      this._enforceAllCatCrewHeights();
       const headerComment = document.getElementById('crew-header-comment').value.trim();
       downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment, TAKEOFF_TASKS, PARKING_TASKS);
     });
@@ -420,6 +422,7 @@ export class UI {
           }
           if (this._originalCrewLuaText) {
             this._enforceAllCatCrewHide();
+            this._enforceAllCatCrewHeights();
             const patched = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
               CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS);
             await CS.writeConfigFile(saveConfig, 'crew.lua', patched);
@@ -458,6 +461,7 @@ export class UI {
         }
         if (this._originalCrewLuaText) {
           this._enforceAllCatCrewHide();
+          this._enforceAllCatCrewHeights();
           downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS);
         }
       }
@@ -599,7 +603,7 @@ export class UI {
     // Canvas height drag handle
     const resizeHandle = document.getElementById('canvas-resize-handle');
     let resizeDragY = 0, resizeStartH = 0;
-    resizeHandle.addEventListener('mousedown', (e) => {
+    resizeHandle.addEventListener('pointerdown', (e) => {
       resizeDragY = e.clientY;
       resizeStartH = this.canvas.getBoundingClientRect().height;
       const onMove = (ev) => {
@@ -608,11 +612,11 @@ export class UI {
         this._resize();
       };
       const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
       };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
       e.preventDefault();
     });
 
@@ -1468,7 +1472,7 @@ export class UI {
       }
 
       // Click to select + drag
-      box.addEventListener('mousedown', (e) => {
+      box.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         this.rs.pushUndo('drag-handoff');
         this._selectedHandoff = si;
@@ -2733,7 +2737,6 @@ export class UI {
 
   /** Set all h values for a catapult's crew to deck height or sea level. */
   _applyCatCrewHide(catIdx) {
-    const DECK_H = 20.1494140625;
     const SEA_H = 0.0123;
     const hidden = this._catCrewHidden[catIdx];
     const crew = CATAPULT_CREWS[catIdx];
@@ -2750,15 +2753,12 @@ export class UI {
         }
       } else {
         // Restore h based on deck polygon (port or starboard balcony if off-deck)
-        const BALCONY_PORT_H = 18.837890625;
-        const BALCONY_STBD_H = 18.6;
-        const hFor = (x, y) => pointOnDeck(x, y) ? DECK_H : (y < 0 ? BALCONY_STBD_H : BALCONY_PORT_H);
-        member.position.h = hFor(member.position.x, member.position.y);
+        member.position.h = heightForPos(member.position.x, member.position.y);
         if (member.fastStartPosition) {
-          member.fastStartPosition.h = hFor(member.fastStartPosition.x, member.fastStartPosition.y);
+          member.fastStartPosition.h = heightForPos(member.fastStartPosition.x, member.fastStartPosition.y);
         }
         for (const route of member.routes) {
-          for (const pt of route.points) pt.h = hFor(pt.x, pt.y);
+          for (const pt of route.points) pt.h = heightForPos(pt.x, pt.y);
         }
       }
     }
@@ -2768,6 +2768,29 @@ export class UI {
   _enforceAllCatCrewHide() {
     for (let i = 0; i < 4; i++) {
       this._applyCatCrewHide(i);
+    }
+  }
+
+  /** Fix heights for all off-deck cat crew positions/routes before save. */
+  _enforceAllCatCrewHeights() {
+    for (let ci = 0; ci < CATAPULT_CREWS.length && ci < 4; ci++) {
+      if (this._catCrewHidden[ci]) continue; // hidden cats use sea-level h
+      const crew = CATAPULT_CREWS[ci];
+      for (const member of crew.members) {
+        if (!pointOnDeck(member.position.x, member.position.y)) {
+          member.position.h = heightForPos(member.position.x, member.position.y);
+        }
+        if (member.fastStartPosition && !pointOnDeck(member.fastStartPosition.x, member.fastStartPosition.y)) {
+          member.fastStartPosition.h = heightForPos(member.fastStartPosition.x, member.fastStartPosition.y);
+        }
+        for (const route of member.routes) {
+          for (const pt of route.points) {
+            if (!pointOnDeck(pt.x, pt.y)) {
+              pt.h = heightForPos(pt.x, pt.y);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -2868,7 +2891,7 @@ export class UI {
       row.innerHTML = `
         <span style="display:inline-block;width:8px;height:8px;transform:rotate(45deg);background:${colors.fill};border:1px solid ${colors.stroke};margin-right:4px;flex-shrink:0"></span>
         <span class="route-label" style="min-width:70px;cursor:pointer">${member.name}</span>
-        <span style="font-size:10px;color:#888;font-variant-numeric:tabular-nums">${wx.toFixed(2)}, ${wy.toFixed(2)}</span>
+        <span style="font-size:10px;color:#888;font-variant-numeric:tabular-nums">${wx.toFixed(2)}, ${wy.toFixed(2)}, h=${member.position.h != null ? member.position.h : '?'}</span>
         <button class="route-revert-btn" title="Revert to original" ${isModified ? '' : 'disabled'}>Revert</button>
       `;
       row.querySelector('.route-label').addEventListener('click', () => {

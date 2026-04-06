@@ -11,12 +11,12 @@ import { pointOnDeck } from './polygon-data.js';
 
 const DECK_H = 20.1494140625;
 const BALCONY_PORT_H = 18.837890625;
-const BALCONY_STBD_H = 18.6;
+const BALCONY_STBD_H = 18.56;
 
 /** Return correct height for a position: deck, port balcony, or starboard bow balcony. */
-function heightForPos(x, y) {
+export function heightForPos(x, y) {
   if (pointOnDeck(x, y)) return DECK_H;
-  return y < 0 ? BALCONY_STBD_H : BALCONY_PORT_H;
+  return y > 0 ? BALCONY_STBD_H : BALCONY_PORT_H;
 }
 
 function cloneRoutes(src) {
