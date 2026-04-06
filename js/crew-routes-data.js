@@ -191,13 +191,22 @@ export const CREW_ACTIVE_LINKS = (() => {
  * Refresh CREW_ACTIVE_LINKS from current TAKEOFF_TASKS (after task mutation).
  * @param {Array} takeoffTasks — current TAKEOFF_TASKS array
  */
-export function refreshCrewActiveLinks(takeoffTasks) {
+export function refreshCrewActiveLinks(takeoffTasks, parkingTasks) {
   TASK_ASSIGNMENTS.length = 0;
   for (const task of takeoffTasks) {
     for (const step of task.steps) {
       TASK_ASSIGNMENTS.push({ memberIdx: step.memberId, routeId: step.routeId });
     }
     TASK_ASSIGNMENTS.push({ memberIdx: task.brownId, routeId: task.brownRouteId });
+  }
+  if (parkingTasks) {
+    for (const task of parkingTasks) {
+      for (const step of task.steps) {
+        if (step.routeId >= 0) {
+          TASK_ASSIGNMENTS.push({ memberIdx: step.memberId, routeId: step.routeId });
+        }
+      }
+    }
   }
   CREW_ACTIVE_LINKS.length = 0;
   const seen = new Set();
@@ -213,17 +222,26 @@ export function refreshCrewActiveLinks(takeoffTasks) {
  * Replace all crew route and task data in-place from parsed crew.lua data.
  * Recalculates CREW_ACTIVE_LINKS.
  */
-export function replaceCrewRoutes(routes, takeoffTasks) {
+export function replaceCrewRoutes(routes, takeoffTasks, parkingTasks) {
   CREW_ROUTES.length = 0;
   CREW_ROUTES.push(...routes);
 
-  // Rebuild TASK_ASSIGNMENTS from takeoff tasks
+  // Rebuild TASK_ASSIGNMENTS from takeoff + parking tasks
   TASK_ASSIGNMENTS.length = 0;
   for (const task of takeoffTasks) {
     for (const step of task.steps) {
       TASK_ASSIGNMENTS.push({ memberIdx: step.memberId, routeId: step.routeId });
     }
     TASK_ASSIGNMENTS.push({ memberIdx: task.brownId, routeId: task.brownRouteId });
+  }
+  if (parkingTasks) {
+    for (const task of parkingTasks) {
+      for (const step of task.steps) {
+        if (step.routeId >= 0) {
+          TASK_ASSIGNMENTS.push({ memberIdx: step.memberId, routeId: step.routeId });
+        }
+      }
+    }
   }
 
   // Rebuild CREW_ACTIVE_LINKS

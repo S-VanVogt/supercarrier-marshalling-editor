@@ -730,7 +730,7 @@ export class UI {
   }
 
   _rebuildCrewLists() {
-    refreshCrewActiveLinks(TAKEOFF_TASKS);
+    refreshCrewActiveLinks(TAKEOFF_TASKS, PARKING_TASKS);
     refreshTaskDerivedData();
     this._buildCrewRefMaps();
     this._rebuildCrewIdleList();
@@ -1095,7 +1095,7 @@ export class UI {
     replaceCrewMembers(data.members);
 
     // Replace routes data in-place
-    replaceCrewRoutes(data.routes, data.takeoffTasks);
+    replaceCrewRoutes(data.routes, data.takeoffTasks, data.parkingTasks);
 
     // Replace task data in-place
     replaceTaskData(data.takeoffTasks, data.parkingTasks);
@@ -1605,11 +1605,22 @@ export class UI {
     const isTakeoff = this.rs.selectedRouteType === 'takeoff';
 
     // Canvas click: active sets both (member + route pair), idle sets member + route -1
+    // If active position has no known member link, keep existing memberId
     let memberId, routeId;
     if (hit.type === 'active') {
       const link = CREW_ACTIVE_LINKS.find(l => l.routeId === hit.idx);
-      memberId = link ? link.memberIdx : 0;
       routeId = hit.idx;
+      if (link) {
+        memberId = link.memberIdx;
+      } else {
+        // No link — keep existing memberId, only update routeId
+        if (this._assignIsBrown) {
+          memberId = task.brownId;
+        } else {
+          const step = task.steps[this._assignStepIdx];
+          memberId = step ? step.memberId : 0;
+        }
+      }
     } else {
       memberId = hit.idx;
       routeId = -1;
