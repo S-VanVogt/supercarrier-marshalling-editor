@@ -7,6 +7,39 @@
 const DECK_HEIGHT = '20.1494';
 
 /**
+ * Determine deck area name from spawn point coordinates.
+ */
+function getSpawnAreaName(x, y) {
+  // Patio (aft port): x < -110, y > 20
+  if (x < -110 && y > 20) {
+    if (x > -125) return 'Patio fore';
+    if (x > -135) return 'Patio mid';
+    return 'Patio aft';
+  }
+  // El4 (starboard aft): x < -85, y < -25
+  if (x < -85 && y < -25) return 'El4';
+  // El3 (aft port): x < -85, y > 25
+  if (x < -85 && y > 25) return 'El3';
+  // Junkyard: x ~ -72, y ~ 23
+  if (x < -60 && x > -85 && y > 15 && y < 30) return 'Junkyard';
+  // Hummer hole: x ~ -40, y ~ 16
+  if (x < -30 && x > -50 && y > 10 && y < 25) return 'Hummer hole';
+  // El2: x ~ -13 to -25, y > 30
+  if (x < -5 && x > -30 && y > 30) return 'El2';
+  // Corral: x ~ 6, y > 30
+  if (x >= -5 && x < 15 && y > 30) return 'Corral';
+  // El1: x ~ 22-35, y > 30
+  if (x >= 15 && x < 40 && y > 30) return 'El1';
+  // 6-pack: x ~ -25 to 25, y ~ 9-13
+  if (x > -30 && x < 30 && y > 5 && y < 20) return '6-pack';
+  // Point: x > 50, y > 30
+  if (x > 50 && y > 30) return 'Point';
+  // 1Row: x > 80, y < 25
+  if (x > 80 && y < 25) return '1Row';
+  return 'Deck';
+}
+
+/**
  * Find the start/end character offsets of each active route's Points { ... }
  * inner block within the GT.TaxiForTORoutes section.
  * Uses brace-counting to handle nested braces and skips block comments.
@@ -149,6 +182,10 @@ export function parseTakeoffRoutes(luaText) {
 
     // Extract the inner content of the Points block, stripping commented-out lines
     const rawInner = luaText.slice(blocks[i].pointsStart, blocks[i].pointsEnd);
+
+    // Extract label from inline comment: -- Route N: <label>
+    const labelMatch = rawInner.match(/--\s*Route\s+\d+\s*:\s*(.+)/);
+
     const inner = rawInner.replace(/^[ \t]*--.*$/gm, '');
 
     // Parse each point line: {{ x, y_height, z }, V_target [, terminal_size] }
@@ -170,11 +207,21 @@ export function parseTakeoffRoutes(luaText) {
       points.push({ x, y: z, v });
     }
 
-    const catNames = { 1: 'Cat 1', 2: 'Cat 2', 3: 'Cat 3', 4: 'Cat 4' };
+    // Use existing label from comment, or generate from spawn area + cat
+    let label;
+    if (labelMatch) {
+      label = labelMatch[1].trim();
+    } else if (points.length > 0) {
+      const area = getSpawnAreaName(points[0].x, points[0].y);
+      label = `${area} to Cat ${runwayIdx}`;
+    } else {
+      label = `Route ${i + 1}`;
+    }
+
     routes.push({
       id: i + 1,
       runwayIdx,
-      label: `Route ${i + 1} → ${catNames[runwayIdx] || 'Cat ' + runwayIdx}`,
+      label,
       terminalSize,
       points,
     });
@@ -263,6 +310,11 @@ export function parseLandingRoutes(luaText) {
   const routes = [];
   for (let i = 0; i < blocks.length; i++) {
     const rawInner = luaText.slice(blocks[i].pointsStart, blocks[i].pointsEnd);
+
+    // Extract label from inline comment: -- Route N: <label>
+    const labelMatch = rawInner.match(/--\s*Route\s+\d+\s*:\s*(.+)/);
+    const label = labelMatch ? labelMatch[1].trim() : `Landing ${i + 1}`;
+
     const inner = rawInner.replace(/^[ \t]*--.*$/gm, '');
 
     const points = [];
@@ -291,7 +343,7 @@ export function parseLandingRoutes(luaText) {
 
     routes.push({
       id: i + 1,
-      label: `Landing ${i + 1}`,
+      label,
       despawnTime,
       points,
     });

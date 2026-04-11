@@ -524,9 +524,12 @@ function findTakeoffTaskBlocks(lua) {
  * Build the inner content of a takeoff task block.
  * Preserves the Lua formatting convention.
  */
-function buildTaskInner(task) {
+function buildTaskInner(task, routeLabel) {
   const indent = '                ';
   const lines = [];
+  if (routeLabel) {
+    lines.push(`${indent}-- ${routeLabel}`);
+  }
   // Steps
   for (let i = 0; i < task.steps.length; i++) {
     const s = task.steps[i];
@@ -545,17 +548,18 @@ function buildTaskInner(task) {
 /**
  * Patch takeoff task data into crew.lua text.
  */
-export function patchTakeoffTasks(lua, tasks) {
+export function patchTakeoffTasks(lua, tasks, routeLabels) {
   const blocks = findTakeoffTaskBlocks(lua);
   if (blocks.length === 0) return lua;
 
   const patches = [];
   for (const block of blocks) {
     if (block.taskIdx < 0 || block.taskIdx >= tasks.length) continue;
+    const label = routeLabels && routeLabels[block.taskIdx];
     patches.push({
       start: block.innerStart,
       end: block.innerEnd,
-      replacement: buildTaskInner(tasks[block.taskIdx]),
+      replacement: buildTaskInner(tasks[block.taskIdx], label),
     });
   }
 
@@ -597,9 +601,12 @@ function findParkingTaskBlocks(lua) {
   return blocks;
 }
 
-function buildParkingTaskInner(task) {
+function buildParkingTaskInner(task, routeLabel) {
   const indent = '                ';
   const lines = [];
+  if (routeLabel) {
+    lines.push(`${indent}-- ${routeLabel}`);
+  }
   for (let i = 0; i < task.steps.length; i++) {
     const s = task.steps[i];
     lines.push(`${indent}[${i + 1}] = {`);
@@ -611,17 +618,18 @@ function buildParkingTaskInner(task) {
   return '\n' + lines.join('\n') + '\n            ';
 }
 
-export function patchParkingTasks(lua, tasks) {
+export function patchParkingTasks(lua, tasks, routeLabels) {
   const blocks = findParkingTaskBlocks(lua);
   if (blocks.length === 0) return lua;
 
   const patches = [];
   for (const block of blocks) {
     if (block.taskIdx < 0 || block.taskIdx >= tasks.length) continue;
+    const label = routeLabels && routeLabels[block.taskIdx];
     patches.push({
       start: block.innerStart,
       end: block.innerEnd,
-      replacement: buildParkingTaskInner(tasks[block.taskIdx]),
+      replacement: buildParkingTaskInner(tasks[block.taskIdx], label),
     });
   }
 
@@ -635,16 +643,16 @@ export function patchParkingTasks(lua, tasks) {
 /**
  * Build the fully patched crew.lua string (no download).
  */
-export function buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks, parkingTasks) {
+export function buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks, parkingTasks, takeoffLabels, landingLabels) {
   let patched = patchCrewLua(originalText, members, routes, headerComment);
   if (catapultCrews && catapultCrews.length > 0) {
     patched = patchCatCrewLua(patched, catapultCrews, originalCatCrews);
   }
   if (takeoffTasks && takeoffTasks.length > 0) {
-    patched = patchTakeoffTasks(patched, takeoffTasks);
+    patched = patchTakeoffTasks(patched, takeoffTasks, takeoffLabels);
   }
   if (parkingTasks && parkingTasks.length > 0) {
-    patched = patchParkingTasks(patched, parkingTasks);
+    patched = patchParkingTasks(patched, parkingTasks, landingLabels);
   }
   return patched;
 }
@@ -652,8 +660,8 @@ export function buildPatchedCrewLua(originalText, members, routes, catapultCrews
 /**
  * Download patched crew.lua as a file (includes deck crew, catapult crew, and task edits).
  */
-export function downloadPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks, parkingTasks) {
-  const patched = buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks, parkingTasks);
+export function downloadPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks, parkingTasks, takeoffLabels, landingLabels) {
+  const patched = buildPatchedCrewLua(originalText, members, routes, catapultCrews, originalCatCrews, headerComment, takeoffTasks, parkingTasks, takeoffLabels, landingLabels);
   const blob = new Blob([patched], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

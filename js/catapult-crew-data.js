@@ -54,6 +54,37 @@ export function routePathLength(points) {
 }
 
 /**
+ * Interpolate position along a route's points by true arc length.
+ * t is 0..1 over the route's total path length.
+ * Returns { x, y, hdg } where hdg is in degrees (DCS convention, negated atan2).
+ */
+export function interpolateByArcLength(pts, t) {
+  if (pts.length === 1) return { x: pts[0].x, y: pts[0].y, hdg: 0 };
+  // Build cumulative distances
+  const cumDist = [0];
+  for (let i = 1; i < pts.length; i++) {
+    const dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y;
+    cumDist.push(cumDist[i - 1] + Math.sqrt(dx * dx + dy * dy));
+  }
+  const totalLen = cumDist[cumDist.length - 1];
+  if (totalLen < 0.001) return { x: pts[0].x, y: pts[0].y, hdg: 0 };
+  const targetDist = t * totalLen;
+  // Find segment
+  let si = 0;
+  for (let i = 1; i < cumDist.length; i++) {
+    if (cumDist[i] >= targetDist) { si = i - 1; break; }
+    si = i - 1;
+  }
+  const segLen = cumDist[si + 1] - cumDist[si];
+  const segT = segLen > 0 ? (targetDist - cumDist[si]) / segLen : 0;
+  const a = pts[si], b = pts[si + 1];
+  const x = a.x + (b.x - a.x) * segT;
+  const y = a.y + (b.y - a.y) * segT;
+  const hdg = -Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+  return { x, y, hdg };
+}
+
+/**
  * For a given global t (0–1 over the longest route), compute each member's
  * local t based on their path length ratio. Returns an array of local t values
  * (one per member), clamped to [0, 1].

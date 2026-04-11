@@ -8,7 +8,7 @@ import { CREW_MEMBERS, LIVERY_COLOURS } from './crew-data.js';
 import { CREW_ROUTES, CREW_ACTIVE_LINKS } from './crew-routes-data.js';
 import { CATAPULT_COLORS, LANDING_COLOR } from './route-data.js';
 import { TAKEOFF_TASKS, PARKING_TASKS, TAKEOFF_USED_ROUTE_IDS, NON_TAKEOFF_LINKS } from './takeoff-tasks-data.js';
-import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs } from './catapult-crew-data.js';
+import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs, interpolateByArcLength } from './catapult-crew-data.js';
 
 export class Renderer {
   /** @param {HTMLCanvasElement} canvas  @param {import('./viewport.js').Viewport} viewport */
@@ -183,6 +183,19 @@ export class Renderer {
       ctx.fillText(cat.name, cc.x, cc.y);
       ctx.fillStyle = 'rgba(200,60,60,0.08)';
     }
+
+    // Fixed marker circle at (78.2, 30.0), diameter 0.5
+    const mc = this.wc(78.2, 30.0);
+    const refO = this.wc(0, 0);
+    const refR = this.wc(1, 0);
+    const mr = 0.25 * Math.abs(refR.x - refO.x);
+    ctx.beginPath();
+    ctx.arc(mc.x, mc.y, mr, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(200,60,60,0.08)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,60,60,0.7)';
+    ctx.stroke();
+
     ctx.restore();
   }
 
@@ -252,6 +265,9 @@ export class Renderer {
   ];
   static FOUL_LINE_3 = [
     { x: 43.5, y: 6.5 }, { x: 165.1, y: -5.1 },
+  ];
+  static FOUL_LINE_4 = [
+    { x: 43.4, y: 32.6 }, { x: 78.9, y: 29.1 },
   ];
 
   // Elevators
@@ -339,7 +355,7 @@ export class Renderer {
     }
 
     // Foul lines (dashed red/white, world-space width)
-    for (const foul of [Renderer.FOUL_LINE_1, Renderer.FOUL_LINE_2, Renderer.FOUL_LINE_3]) {
+    for (const foul of [Renderer.FOUL_LINE_1, Renderer.FOUL_LINE_2, Renderer.FOUL_LINE_3, Renderer.FOUL_LINE_4]) {
       const dashWorld = 1.65 * pxPerWorld; // 1.65m dashes
       ctx.lineWidth = 0.2 * pxPerWorld;
       ctx.lineCap = 'butt';
@@ -1560,17 +1576,11 @@ export class Renderer {
           wy = pts[0].y;
           hdg = member.position.hdg;
         } else {
-          // Interpolate along waypoints by arc length
-          const totalSegs = pts.length - 1;
-          const rawIdx = t * totalSegs;
-          const segIdx = Math.min(Math.floor(rawIdx), totalSegs - 1);
-          const segT = rawIdx - segIdx;
-          const a = pts[segIdx], b = pts[segIdx + 1];
-          wx = a.x + (b.x - a.x) * segT;
-          wy = a.y + (b.y - a.y) * segT;
-          // Face movement direction (negated to match DCS heading convention)
-          const dx = b.x - a.x, dy = b.y - a.y;
-          hdg = -Math.atan2(dy, dx) * 180 / Math.PI;
+          // Interpolate along waypoints by true arc length
+          const interp = interpolateByArcLength(pts, t);
+          wx = interp.x;
+          wy = interp.y;
+          hdg = interp.hdg;
         }
       }
 

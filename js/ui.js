@@ -12,7 +12,7 @@ import { CREW_ROUTES, CREW_ACTIVE_LINKS, replaceCrewRoutes, refreshCrewActiveLin
 import { replaceTaskData, refreshTaskDerivedData, TAKEOFF_TASKS, PARKING_TASKS } from './takeoff-tasks-data.js';
 import { patchCrewLua, downloadPatchedCrewLua, buildPatchedCrewLua } from './crew-lua-patcher.js';
 import { parseCatapultCrew } from './crew-lua-parser.js';
-import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs, replaceCatapultCrews } from './catapult-crew-data.js';
+import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs, interpolateByArcLength, replaceCatapultCrews } from './catapult-crew-data.js';
 import { DEFAULT_CATAPULT_CREWS } from './catapult-crew-defaults.js';
 import { validateTakeoffTasks } from './takeoff-validation.js';
 import * as CS from './config-store.js';
@@ -327,7 +327,9 @@ export class UI {
       this._enforceAllCatCrewHide();
       this._enforceAllCatCrewHeights();
       const headerComment = document.getElementById('crew-header-comment').value.trim();
-      downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment, TAKEOFF_TASKS, PARKING_TASKS);
+      const toLabels = this.rs.takeoffRoutes.map((r, i) => `TO ${i + 1}: ${r.label}`);
+      const ldLabels = this.rs.landingRoutes.map((r, i) => `Landing ${i + 1}: ${r.label}`);
+      downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment, TAKEOFF_TASKS, PARKING_TASKS, toLabels, ldLabels);
     });
 
     // ── Config I/O (folder-based) ──────────────────────────────────────
@@ -415,16 +417,29 @@ export class UI {
           if (!ok) { alert('Permission denied. Please re-select the SC-Configs folder.'); return; }
         }
         try {
+          // Extract version tag from existing file header for archiving
+          const versionRe = /--\s*\[SC-Config\]\s*\S+\s+(v[\d.]+)/;
+          const rrVersion = this._originalLuaText && (this._originalLuaText.match(versionRe) || [])[1];
+          const crewVersion = this._originalCrewLuaText && (this._originalCrewLuaText.match(versionRe) || [])[1];
+
           if (this._originalLuaText) {
             const patched = buildPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp,
               this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
+            if (patched !== this._originalLuaText && rrVersion) {
+              await CS.archiveConfigFile(saveConfig, 'USS_Nimitz_RunwaysAndRoutes.lua', rrVersion);
+            }
             await CS.writeConfigFile(saveConfig, 'USS_Nimitz_RunwaysAndRoutes.lua', patched);
           }
+          const toLabels = this.rs.takeoffRoutes.map((r, i) => `TO ${i + 1}: ${r.label}`);
+          const ldLabels = this.rs.landingRoutes.map((r, i) => `Landing ${i + 1}: ${r.label}`);
           if (this._originalCrewLuaText) {
             this._enforceAllCatCrewHide();
             this._enforceAllCatCrewHeights();
             const patched = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
-              CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS);
+              CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS, toLabels, ldLabels);
+            if (patched !== this._originalCrewLuaText && crewVersion) {
+              await CS.archiveConfigFile(saveConfig, 'crew.lua', crewVersion);
+            }
             await CS.writeConfigFile(saveConfig, 'crew.lua', patched);
           }
           // Patch GroundCrew.lua with disable state
@@ -443,7 +458,7 @@ export class UI {
           }
           if (this._originalCrewLuaText) {
             this._originalCrewLuaText = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
-              CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS);
+              CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS, toLabels, ldLabels);
             this.rs.refreshCrewSnapshots();
             this.rs.refreshCatCrewSnapshots();
           }
@@ -462,7 +477,9 @@ export class UI {
         if (this._originalCrewLuaText) {
           this._enforceAllCatCrewHide();
           this._enforceAllCatCrewHeights();
-          downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS);
+          const toLabels2 = this.rs.takeoffRoutes.map((r, i) => `TO ${i + 1}: ${r.label}`);
+          const ldLabels2 = this.rs.landingRoutes.map((r, i) => `Landing ${i + 1}: ${r.label}`);
+          downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS, toLabels2, ldLabels2);
         }
       }
       // Update loaded variant and save notes for next export
@@ -1156,7 +1173,7 @@ export class UI {
     route.points = [...keep, ...tail.map(p => ({ ...p }))];
     route.runwayIdx = newCat;
     // Update label suffix
-    route.label = route.label.replace(/Cat \d/, `Cat ${newCat}`);
+    route.label = route.label.replace(/→\s*Cat\s*\d/, `to Cat ${newCat}`).replace(/Cat \d/, `Cat ${newCat}`);
     this._rebuildRouteList();
     this.rs._notify();
   }
@@ -1176,6 +1193,9 @@ export class UI {
     const list = document.getElementById('takeoff-route-list');
     list.innerHTML = '';
     this._buildTakeoffRows(list);
+    const lList = document.getElementById('landing-route-list');
+    lList.innerHTML = '';
+    this._buildLandingRows(lList);
     this._syncRoutePanel();
   }
 
@@ -2885,13 +2905,8 @@ export class UI {
         } else if (t <= 0) {
           wx = pts[0].x; wy = pts[0].y;
         } else {
-          const totalSegs = pts.length - 1;
-          const rawIdx = t * totalSegs;
-          const segIdx = Math.min(Math.floor(rawIdx), totalSegs - 1);
-          const segT = rawIdx - segIdx;
-          const a = pts[segIdx], b = pts[segIdx + 1];
-          wx = a.x + (b.x - a.x) * segT;
-          wy = a.y + (b.y - a.y) * segT;
+          const interp = interpolateByArcLength(pts, t);
+          wx = interp.x; wy = interp.y;
         }
       }
 

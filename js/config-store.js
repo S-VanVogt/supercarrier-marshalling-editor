@@ -135,6 +135,41 @@ export async function readConfigFile(configName, fileName) {
 }
 
 /**
+ * Archive the current version of a file before overwriting.
+ * Copies to Archive/<basename>_<versionTag>.<ext> inside the config folder.
+ * Creates the Archive subfolder if it doesn't exist.
+ * Silently skips if the file doesn't exist or versionTag is empty.
+ * @param {string} configName - subfolder name
+ * @param {string} fileName - e.g. 'crew.lua'
+ * @param {string} versionTag - e.g. 'v0.17'
+ */
+export async function archiveConfigFile(configName, fileName, versionTag) {
+  if (!_rootHandle || !versionTag) return;
+  try {
+    const dirHandle = await _rootHandle.getDirectoryHandle(configName);
+    // Read existing file
+    const fileHandle = await dirHandle.getFileHandle(fileName);
+    const file = await fileHandle.getFile();
+    const content = await file.text();
+    // Build archive filename: crew.lua → crew_v0.17.lua
+    const dotIdx = fileName.lastIndexOf('.');
+    const base = dotIdx >= 0 ? fileName.slice(0, dotIdx) : fileName;
+    const ext = dotIdx >= 0 ? fileName.slice(dotIdx) : '';
+    const archiveName = `${base}_${versionTag}${ext}`;
+    // Create Archive subfolder if needed
+    const archiveDir = await dirHandle.getDirectoryHandle('Archive', { create: true });
+    const archiveFile = await archiveDir.getFileHandle(archiveName, { create: true });
+    const writable = await archiveFile.createWritable();
+    await writable.write(content);
+    await writable.close();
+    console.log(`Archived ${fileName} → Archive/${archiveName}`);
+  } catch (err) {
+    // File doesn't exist or permission issue — skip silently
+    console.warn(`Archive skipped for ${fileName}: ${err.message}`);
+  }
+}
+
+/**
  * Write a file to a config subfolder (overwrite).
  * @param {string} configName - subfolder name
  * @param {string} fileName - e.g. 'crew.lua'

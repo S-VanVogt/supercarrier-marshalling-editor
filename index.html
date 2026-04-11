@@ -36,13 +36,18 @@
   v0.1.68 — Fix port/starboard direction, enforce off-deck heights before save, show h in cat crew panel
   v0.1.69 — Mobile: touch support for task bar drag + canvas resize, show h1 title on narrow screens
   v0.1.70 — Fix assign: include parking task routes in CREW_ACTIVE_LINKS, keep memberId on unlinked routes
+  v0.1.71 — Read/write landing route labels from lua comments, foul line 4, marker circle
+  v0.1.72 — Read/write takeoff route labels from lua comments, rebuild landing rows on config load, archive on save
+  v0.1.75 — Cat crew arc-length interpolation: all crew same speed, shorter paths finish first; common_disabled.xml in SC_FILES
+  v0.1.75 — Add route label comments to takeoff_tasks and parking_tasks in crew.lua export
+  v0.1.75 — Auto-generate takeoff route labels from spawn area + cat destination, "to" format
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.70</title>
+  <title>SuperCarrier Marshalling Editor v0.1.75</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -50,7 +55,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.70</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.75</h1>
       <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
     <canvas id="c" height="475"></canvas>
