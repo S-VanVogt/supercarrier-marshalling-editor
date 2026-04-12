@@ -42,6 +42,9 @@ export class UI {
     this.addXInput   = document.getElementById('add-x');
     this.addYInput   = document.getElementById('add-y');
 
+    // Cat crew banner slider mode
+    this._catCrewSliderMode = false;
+
     // Task edit state
     this._taskEditActive = false;
     this._selectedHandoff = -1;  // step index, -1 = none
@@ -93,9 +96,17 @@ export class UI {
       }
     });
 
-    // Slider
+    // Slider — drives route t or cat crew t depending on mode
     this.slider.addEventListener('input', () => {
-      this.rs.setT(this.slider.value / 100);
+      if (this._catCrewSliderMode) {
+        const v = this.slider.value / 100;
+        this.rs.setCatCrewT(v);
+        document.getElementById('cat-crew-t-value').textContent = v.toFixed(2);
+        const panelSlider = document.getElementById('cat-crew-slider');
+        if (panelSlider) panelSlider.value = v;
+      } else {
+        this.rs.setT(this.slider.value / 100);
+      }
     });
 
     // Canvas — drag to move, middle/shift-drag to pan, right-click to add/insert
@@ -185,9 +196,17 @@ export class UI {
         const delta = e.deltaY < 0 ? 5 : -5;
         this.rs.rotateCrewMember(this.rs.hoveredCrewIdx, this.rs.hoveredCrewType, delta, this.rs.hoveredCrewPointIdx);
       } else if (this.rs.catCrewEditMode && this.rs.catCrewEditMember >= 0) {
-        const delta = e.deltaY < 0 ? 5 : -5;
-        this.rs.rotateCatCrewHeading(delta);
-        this.renderList();
+        const w = this._canvasWorld(e);
+        const catHit = this._catCrewHitTest(w);
+        if (catHit.memberIdx === this.rs.catCrewEditMember) {
+          const delta = e.deltaY < 0 ? 5 : -5;
+          this.rs.rotateCatCrewHeading(delta);
+          this.renderList();
+        } else {
+          const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+          this.viewport.zoom(factor, w.x, w.y);
+          this._update();
+        }
       } else {
         const w = this._canvasWorld(e);
         const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
@@ -203,6 +222,13 @@ export class UI {
     document.getElementById('btn-task-add').addEventListener('click', () => this._addTaskStep());
     document.getElementById('btn-task-delete').addEventListener('click', () => this._deleteTaskStep());
     document.getElementById('btn-task-reset').addEventListener('click', () => this._resetTaskStep());
+    // Sync all catcrew endpoints button
+    document.getElementById('btn-sync-endpoints').addEventListener('click', () => {
+      const count = this.rs.syncAllCatCrewEndpoints();
+      this._update();
+      this.renderList();
+      alert(`Synced ${count} endpoint(s) across all catapults.`);
+    });
     // Click track background to deselect handoff
     document.getElementById('task-handoff-track').addEventListener('pointerdown', (e) => {
       if (e.target === e.currentTarget && this._selectedHandoff >= 0) {
@@ -1781,8 +1807,8 @@ export class UI {
     const rs = this.rs;
     const hasRoute = rs.selectedRoute >= 0 && rs.selectedRouteType;
     const showCrewBar = !!rs.crewEditMode;
-    // Show progress bar when a route is selected (even if crew edit also active)
-    progressBar.style.display = hasRoute ? '' : (showCrewBar ? 'none' : '');
+    // Show progress bar when a route is selected, cat crew slider mode, or no crew edit
+    progressBar.style.display = (hasRoute || this._catCrewSliderMode) ? '' : (showCrewBar ? 'none' : '');
     crewBar.style.display = showCrewBar ? '' : 'none';
 
     if (!rs.crewEditMode || rs.selectedCrewIdx < 0 || !rs.selectedCrewType) {
@@ -2002,7 +2028,7 @@ export class UI {
       const routeHit = this._routeHitTest(w);
       if (routeHit) {
         this.rs.exitCatCrewEdit();
-        this.rs.selectRoute(routeHit.type, routeHit.idx);
+        this._selectRouteAndSwitchTab(routeHit.type, routeHit.idx);
         this.renderList();
         return;
       }
@@ -2043,7 +2069,7 @@ export class UI {
       // Try another route segment to switch route
       const routeHit = this._routeHitTest(w);
       if (routeHit) {
-        this.rs.selectRoute(routeHit.type, routeHit.idx);
+        this._selectRouteAndSwitchTab(routeHit.type, routeHit.idx);
         this.renderList();
         return;
       }
@@ -2072,7 +2098,7 @@ export class UI {
       const routeHit = this._routeHitTest(w);
       if (routeHit) {
         this.rs.exitCrewEdit();
-        this.rs.selectRoute(routeHit.type, routeHit.idx);
+        this._selectRouteAndSwitchTab(routeHit.type, routeHit.idx);
         this.renderList();
         return;
       }
@@ -2103,7 +2129,7 @@ export class UI {
       }
       const routeHit = this._routeHitTest(w);
       if (routeHit) {
-        this.rs.selectRoute(routeHit.type, routeHit.idx);
+        this._selectRouteAndSwitchTab(routeHit.type, routeHit.idx);
         this.renderList();
         return;
       }
@@ -2626,22 +2652,71 @@ export class UI {
     this.renderList();
   }
 
+  _selectRouteAndSwitchTab(type, idx) {
+    this.rs.selectRoute(type, idx);
+    // Switch to Routes tab only if Catapult Crew tab is active
+    const catTab = document.querySelector('.tab-btn[data-tab="panel-catapult-crew"]');
+    if (catTab && catTab.classList.contains('active')) {
+      const routesTab = document.querySelector('.tab-btn[data-tab="panel-routes"]');
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      routesTab.classList.add('active');
+      const pane = document.getElementById('panel-routes');
+      if (pane) pane.classList.add('active');
+    }
+  }
+
+  setCatCrewSliderMode(on) {
+    this._catCrewSliderMode = on;
+    // Hide panel slider row when banner slider drives cat crew t
+    const panelSlider = document.querySelector('.cat-slider-row');
+    if (panelSlider) panelSlider.style.display = on ? 'none' : '';
+    // Show the progress bar area even without a route selected
+    const progressBar = document.getElementById('progress-bar');
+    if (progressBar && on) progressBar.style.display = '';
+    this._update();
+  }
+
   // ── Render loop ────────────────────────────────────────────────────────
   _update() {
-    this.tval.textContent = this.rs.t.toFixed(2);
-    this.slider.value = Math.round(this.rs.t * 100);
+    // Auto-exit cat crew slider mode if a route gets selected
+    if (this._catCrewSliderMode && this.rs.selectedRoute >= 0) {
+      this._catCrewSliderMode = false;
+      const panelSlider = document.querySelector('.cat-slider-row');
+      if (panelSlider) panelSlider.style.display = '';
+    }
+    if (this._catCrewSliderMode) {
+      const ct = this.rs.catCrewT != null ? this.rs.catCrewT : 1;
+      this.tval.textContent = ct.toFixed(2);
+      this.slider.value = Math.round(ct * 100);
+    } else {
+      this.tval.textContent = this.rs.t.toFixed(2);
+      this.slider.value = Math.round(this.rs.t * 100);
+    }
     this.renderer.render(this.rs);
 
     // Update progress label and coord display from route marker
     const pLabel = document.getElementById('progress-label');
     const route = this.rs.getSelectedRoute();
     if (pLabel) {
-      pLabel.textContent = route ? `Route ${this.rs.selectedRoute + 1}:` : 'Progress:';
+      pLabel.textContent = this._catCrewSliderMode ? 'Route t:' :
+                           route ? `Route ${this.rs.selectedRoute + 1}:` : 'Progress:';
     }
     if (route) {
       const rpt = polylinePoint(route.points, this.rs.t);
       if (rpt) {
         this.coordout.textContent = `x: ${rpt.x.toFixed(2)} y: ${rpt.y.toFixed(2)} v: ${rpt.v.toFixed(2)}`;
+      }
+    } else if (this.rs.catCrewEditMode && this.rs.catCrewSelectedPoint >= 0) {
+      const catRoute = this.rs.getCatCrewEditRoute();
+      if (catRoute && catRoute.points[this.rs.catCrewSelectedPoint]) {
+        const p = catRoute.points[this.rs.catCrewSelectedPoint];
+        let txt = `x: ${p.x.toFixed(2)} y: ${p.y.toFixed(2)}`;
+        // Show final_heading on last point if available
+        if (this.rs.catCrewSelectedPoint === catRoute.points.length - 1 && catRoute.finalHeading != null) {
+          txt += ` hdg: ${catRoute.finalHeading.toFixed(1)}`;
+        }
+        this.coordout.textContent = txt;
       }
     } else {
       this.coordout.textContent = 'x: \u2014, y: \u2014';

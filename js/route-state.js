@@ -711,7 +711,125 @@ class RouteState {
     route.points[pointIdx].h = heightForPos(x, y);
     // Only recalc tangent for the moved point — preserve neighbors' original tangents
     recalcTangents(route.points, [pointIdx]);
+    // Sync adjacent phase endpoints
+    this._syncCatCrewAdjacentPoint(route, pointIdx, x, y);
     this._notify();
+  }
+
+  /**
+   * When a cat crew endpoint is moved, sync the matching point in the adjacent phase.
+   * Transitions: launch end↔initial start, initial end↔free start,
+   *              free end↔occupy start, occupy end↔free start,
+   *              launch end↔fastStartPosition
+   */
+  _syncCatCrewAdjacentPoint(route, pointIdx, x, y) {
+    const member = this.getCatCrewEditMember();
+    if (!member) return;
+    const h = heightForPos(x, y);
+    const isFirst = pointIdx === 0;
+    const isLast = pointIdx === route.points.length - 1;
+    if (!isFirst && !isLast) return; // only endpoints sync
+
+    const suffix = route.name.replace(/^\d+\./, ''); // strip leading "01." etc.
+    const findRoute = (s) => member.routes.find(r => r.name.includes(s)) || null;
+
+    // Helper to update a point and recalc its tangent
+    const syncPoint = (targetRoute, targetIdx) => {
+      if (!targetRoute || !targetRoute.points[targetIdx]) return;
+      targetRoute.points[targetIdx].x = x;
+      targetRoute.points[targetIdx].y = y;
+      targetRoute.points[targetIdx].h = h;
+      recalcTangents(targetRoute.points, [targetIdx]);
+    };
+
+    if (suffix.includes('launch_pos') && isLast) {
+      // Launch end → Initial start
+      syncPoint(findRoute('initial_pos'), 0);
+      // Launch end → Fast Start position
+      if (member.fastStartPosition) {
+        member.fastStartPosition.x = x;
+        member.fastStartPosition.y = y;
+      }
+    } else if (suffix.includes('initial_pos') && isFirst) {
+      // Initial start → Launch end
+      const lr = findRoute('launch_pos');
+      if (lr) syncPoint(lr, lr.points.length - 1);
+    } else if (suffix.includes('initial_pos') && isLast) {
+      // Initial end → Free start
+      syncPoint(findRoute('free_cat'), 0);
+    } else if (suffix.includes('free_cat') && isFirst) {
+      // Free start → Initial end + Occupy end
+      const ir = findRoute('initial_pos');
+      if (ir) syncPoint(ir, ir.points.length - 1);
+      const or = findRoute('occupy_cat');
+      if (or) syncPoint(or, or.points.length - 1);
+    } else if (suffix.includes('free_cat') && isLast) {
+      // Free end → Occupy start
+      syncPoint(findRoute('occupy_cat'), 0);
+    } else if (suffix.includes('occupy_cat') && isFirst) {
+      // Occupy start → Free end
+      const fr = findRoute('free_cat');
+      if (fr) syncPoint(fr, fr.points.length - 1);
+    } else if (suffix.includes('occupy_cat') && isLast) {
+      // Occupy end → Free start
+      syncPoint(findRoute('free_cat'), 0);
+      // Also sync Initial end (it shares the same point as free start)
+      const ir = findRoute('initial_pos');
+      if (ir) syncPoint(ir, ir.points.length - 1);
+    }
+  }
+
+  /**
+   * Sync all adjacent phase endpoints for all catapults and members.
+   * Reference priority: occupy end → free start, free end → occupy start,
+   * initial end → (already synced via free start), launch end → initial start + fast start.
+   */
+  syncAllCatCrewEndpoints() {
+    this.pushUndo();
+    let count = 0;
+    for (const crew of CATAPULT_CREWS) {
+      for (const member of crew.members) {
+        const find = (s) => member.routes.find(r => r.name.includes(s)) || null;
+        const launch  = find('launch_pos');
+        const initial = find('initial_pos');
+        const free    = find('free_cat');
+        const occupy  = find('occupy_cat');
+
+        const sync = (src, srcIdx, dst, dstIdx) => {
+          if (!src || !dst || !src.points[srcIdx] || !dst.points[dstIdx]) return false;
+          const s = src.points[srcIdx], d = dst.points[dstIdx];
+          if (Math.abs(s.x - d.x) < 0.001 && Math.abs(s.y - d.y) < 0.001) return false;
+          d.x = s.x; d.y = s.y; d.h = s.h;
+          recalcTangents(dst.points, [dstIdx]);
+          return true;
+        };
+
+        // Occupy end → Free start (directing position)
+        if (sync(occupy, occupy ? occupy.points.length - 1 : -1, free, 0)) count++;
+        // Free end → Occupy start (safe position)
+        if (sync(free, free ? free.points.length - 1 : -1, occupy, 0)) count++;
+        // Occupy end → Initial end (same directing position)
+        if (occupy && initial && occupy.points.length > 0 && initial.points.length > 0) {
+          if (sync(occupy, occupy.points.length - 1, initial, initial.points.length - 1)) count++;
+        }
+        // Launch end → Initial start
+        if (launch && initial && launch.points.length > 0) {
+          if (sync(launch, launch.points.length - 1, initial, 0)) count++;
+        }
+        // Launch end → Fast Start position
+        if (launch && launch.points.length > 0 && member.fastStartPosition) {
+          const lp = launch.points[launch.points.length - 1];
+          if (Math.abs(lp.x - member.fastStartPosition.x) > 0.001 ||
+              Math.abs(lp.y - member.fastStartPosition.y) > 0.001) {
+            member.fastStartPosition.x = lp.x;
+            member.fastStartPosition.y = lp.y;
+            count++;
+          }
+        }
+      }
+    }
+    this._notify();
+    return count;
   }
 
   addCatCrewWaypoint(afterIdx, x, y) {

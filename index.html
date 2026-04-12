@@ -41,13 +41,16 @@
   v0.1.75 — Cat crew arc-length interpolation: all crew same speed, shorter paths finish first; common_disabled.xml in SC_FILES
   v0.1.75 — Add route label comments to takeoff_tasks and parking_tasks in crew.lua export
   v0.1.75 — Auto-generate takeoff route labels from spawn area + cat destination, "to" format
+  v0.1.76 — Show catapult crew selected vertex x/y/heading in coordout box
+  v0.1.77 — Wider cat crew Route t slider, banner slider drives cat crew t when Catapult Crew tab active
+  v0.1.78 — Cat crew phase endpoint sync: drag auto-updates adjacent phase, Sync Endpoints button for bulk fix
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.75</title>
+  <title>SuperCarrier Marshalling Editor v0.1.78</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -55,7 +58,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.75</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.78</h1>
       <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
     <canvas id="c" height="475"></canvas>
@@ -239,6 +242,7 @@
         <span id="cat-crew-t-value" class="cat-slider-val">1.00</span>
       </div>
       <div class="route-list" id="catcrew-member-list"></div>
+      <button class="btn" id="btn-sync-endpoints" style="margin-top:4px;font-size:11px">Sync Endpoints</button>
       <div class="catcrew-warning" id="catcrew-warning" style="display:none"></div>
     </div>
   </div>

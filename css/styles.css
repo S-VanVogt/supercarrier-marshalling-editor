@@ -274,7 +274,7 @@ button:hover { background: #f1efe8; }
   align-items: center;
   gap: 14px;
 }
-#tslider { min-width: 120px; align-self: center; }
+#tslider { min-width: 250px; align-self: center; }
 .vertex-tick-row {
   display: contents;
 }
@@ -931,8 +931,9 @@ button.needs-attention {
 .takeoff-validation-warning { font-size: 11px; color: #c0392b; padding: 3px 6px; width: 100%; }
 .cat-slider-row {
   display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 11px; color: #5f5e5a;
+  width: 100%;
 }
-.cat-slider-row input[type="range"] { flex: 1; }
+.cat-slider-row input[type="range"] { flex: 1; min-width: 300px; }
 .cat-slider-label { font-size: 11px; white-space: nowrap; }
 .cat-slider-val { font-size: 11px; min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 

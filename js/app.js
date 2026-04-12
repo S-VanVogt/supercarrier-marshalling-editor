@@ -24,4 +24,12 @@ document.getElementById('tab-bar').addEventListener('click', (e) => {
   btn.classList.add('active');
   const pane = document.getElementById(tabId);
   if (pane) pane.classList.add('active');
+
+  // When switching to Catapult Crew tab, exit route edit and use banner slider for cat crew t
+  if (tabId === 'panel-catapult-crew') {
+    if (routeState.selectedRoute >= 0) routeState.deselectRoute();
+    ui.setCatCrewSliderMode(true);
+  } else {
+    ui.setCatCrewSliderMode(false);
+  }
 });
