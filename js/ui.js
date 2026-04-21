@@ -687,13 +687,13 @@ export class UI {
 
   /** Build maps: memberId → Set of takeoff/landing task indices, routeId → same. */
   _buildCrewRefMaps() {
-    // member → { takeoff: Set, landing: Set }
+    // member → { takeoff: Set, landing: Set, idleTakeoff: Set, idleLanding: Set }
     const memberRefs = new Map();
     // route → { takeoff: Set, landing: Set }
     const routeRefs = new Map();
 
     const ensure = (map, id) => {
-      if (!map.has(id)) map.set(id, { takeoff: new Set(), landing: new Set() });
+      if (!map.has(id)) map.set(id, { takeoff: new Set(), landing: new Set(), idleTakeoff: new Set(), idleLanding: new Set() });
       return map.get(id);
     };
 
@@ -701,14 +701,18 @@ export class UI {
       ensure(memberRefs, task.brownId).takeoff.add(ti + 1);
       ensure(routeRefs, task.brownRouteId).takeoff.add(ti + 1);
       for (const step of task.steps) {
-        ensure(memberRefs, step.memberId).takeoff.add(ti + 1);
+        const mr = ensure(memberRefs, step.memberId);
+        mr.takeoff.add(ti + 1);
+        if (step.routeId === -1) mr.idleTakeoff.add(ti + 1);
         if (step.routeId >= 0) ensure(routeRefs, step.routeId).takeoff.add(ti + 1);
       }
     });
 
     PARKING_TASKS.forEach((task, ti) => {
       for (const step of task.steps) {
-        ensure(memberRefs, step.memberId).landing.add(ti + 1);
+        const mr = ensure(memberRefs, step.memberId);
+        mr.landing.add(ti + 1);
+        if (step.routeId === -1) mr.idleLanding.add(ti + 1);
         if (step.routeId >= 0) ensure(routeRefs, step.routeId).landing.add(ti + 1);
       }
     });
@@ -766,9 +770,12 @@ export class UI {
 
   _crewRefLabel(refs) {
     if (!refs) return '';
+    const fmt = (nums, prefix, idleSet) => [...nums].sort((a, b) => a - b)
+      .map(n => idleSet && idleSet.has(n) ? `<span class="crew-ref-idle">${prefix}${n}</span>` : `${prefix}${n}`)
+      .join(' ');
     const parts = [];
-    if (refs.takeoff.size > 0) parts.push([...refs.takeoff].sort((a, b) => a - b).map(n => `T${n}`).join(' '));
-    if (refs.landing.size > 0) parts.push([...refs.landing].sort((a, b) => a - b).map(n => `L${n}`).join(' '));
+    if (refs.takeoff.size > 0) parts.push(fmt(refs.takeoff, 'T', refs.idleTakeoff));
+    if (refs.landing.size > 0) parts.push(fmt(refs.landing, 'L', refs.idleLanding));
     return parts.join(' ');
   }
 
