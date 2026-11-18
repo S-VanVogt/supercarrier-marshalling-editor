@@ -5,13 +5,24 @@ import { Viewport } from './viewport.js';
 import { Renderer } from './renderer.js';
 import { UI } from './ui.js';
 import { routeState } from './route-state.js';
+import { fetchDefaultConfig } from './default-config.js';
+
+// Built-in default config (five files in ./data/). Fetched before the UI is
+// built, so the first paint already shows it rather than the data tables
+// compiled into the JS modules.
+let defaultConfig = null;
+try {
+  defaultConfig = await fetchDefaultConfig();
+} catch (err) {
+  console.error('[default-config] could not load ./data/ —', err.message);
+}
 
 const canvas   = document.getElementById('c');
 const viewport = new Viewport(-168, 172, -44, 40);
 const renderer = new Renderer(canvas, viewport);
 const ui       = new UI(viewport, renderer, routeState);
 
-ui.boot();
+ui.boot(defaultConfig);
 window.__vp = viewport;
 
 // Tab switching

@@ -1,6 +1,8 @@
 /**
- * config-store.js — File System Access API wrapper for SC-Configs folder persistence.
+ * config-store.js — File System Access API wrapper for the config folder.
  *
+ * The config folder is one folder on disk holding one subfolder per config
+ * (an SC-Configs folder made with the SC-Config toolkit has this layout).
  * Stores the directory handle in IndexedDB so it survives page reloads.
  * On restore, re-requests read/write permission (browser will prompt once per session).
  */
@@ -166,6 +168,35 @@ export async function archiveConfigFile(configName, fileName, versionTag) {
   } catch (err) {
     // File doesn't exist or permission issue — skip silently
     console.warn(`Archive skipped for ${fileName}: ${err.message}`);
+  }
+}
+
+/** Does a config subfolder exist in the root folder? */
+export async function configExists(configName) {
+  if (!_rootHandle) return false;
+  try {
+    await _rootHandle.getDirectoryHandle(configName);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Create a config subfolder in the root folder (no-op if it exists). */
+export async function createConfig(configName) {
+  if (!_rootHandle) throw new Error('No config folder set');
+  await _rootHandle.getDirectoryHandle(configName, { create: true });
+}
+
+/** Does a file exist in a config subfolder? */
+export async function configFileExists(configName, fileName) {
+  if (!_rootHandle) return false;
+  try {
+    const dirHandle = await _rootHandle.getDirectoryHandle(configName);
+    await dirHandle.getFileHandle(fileName);
+    return true;
+  } catch {
+    return false;
   }
 }
 

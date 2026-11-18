@@ -25,6 +25,8 @@ import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute
 import { DEFAULT_CATAPULT_CREWS } from './catapult-crew-defaults.js';
 import { validateTakeoffTasks, validateParkingTasks } from './takeoff-validation.js';
 import * as CS from './config-store.js';
+import { CONFIG_FILES } from './default-config.js';
+import { buildOmmPackage, downloadBytes } from './package-builder.js';
 import { pointOnDeck } from './polygon-data.js';
 import { heightForPos } from './route-state.js';
 
@@ -36,12 +38,26 @@ export class UI {
     this.canvas = renderer.canvas;
     this.rs = routeState;
 
-    /** Original Lua text for patching/export. */
+    /**
+     * The config the editor currently holds: one text per file (keys as in
+     * CONFIG_FILES). The two Lua texts and GroundCrew.lua are the baselines
+     * that export patches; the two XML texts are carried along unchanged.
+     * All five are filled by _loadConfig() — at startup from the built-in
+     * default set (see boot()).
+     */
     this._originalLuaText = null;
     this._originalCrewLuaText = null;
-    fetch('./data/USS_Nimitz_RunwaysAndRoutes.lua')
-      .then(r => r.text())
-      .then(text => { this._originalLuaText = text; });
+    this._originalGroundCrewText = null;
+    this._commonXmlText = null;
+    this._commonDisabledXmlText = null;
+    /** Built-in default set from ./data/, or null if it could not be fetched. */
+    this._defaultConfig = null;
+    /** Config folder the on-screen config was loaded from or saved to (null = built-in or imported). */
+    this._loadedFolderConfig = null;
+    /** Pending action of the version / notes form — see _openStampForm(). */
+    this._pendingAction = null;
+    /** Note for the Files tab status line, set by the last save or package. */
+    this._lastActionNote = '';
 
     // DOM references
     this.slider      = document.getElementById('tslider');
@@ -297,7 +313,7 @@ export class UI {
     this.addXInput.addEventListener('keydown', addEnter);
     this.addYInput.addEventListener('keydown', addEnter);
 
-    // ── SC-Configs folder-based I/O (File System Access API) ─────────────
+    // ── Config folder I/O (File System Access API) ───────────────────────
     this._initConfigStore();
 
     // Import Lua
@@ -310,20 +326,9 @@ export class UI {
         if (!file) return;
         file.text().then(text => {
           try {
-            const routes = parseTakeoffRoutes(text);
-            this.rs.loadTakeoffRoutes(routes);
-            const landingRoutes = parseLandingRoutes(text);
-            if (landingRoutes) this.rs.loadLandingRoutes(landingRoutes);
-            const elevators = parseElevators(text);
-            if (elevators) this._loadElevators(elevators);
-            const blockers = parseBlockerTerminals(text);
-            if (blockers) this._loadBlockerTerminals(blockers);
-            this._originalLuaText = text;
+            this._applyRoutesLua(text);
             this.rs.clearUndoHistory();
-            // Parse SC-Config stamp for version overlay
-            const stamp = this._parseScConfigStamp(text);
-            if (stamp) this.rs.loadedVariant = stamp;
-            this._rebuildRouteList();
+            this._syncConfigStatus();
           } catch (err) {
             alert('Failed to parse Lua file: ' + err.message);
           }
@@ -343,6 +348,7 @@ export class UI {
         file.text().then(text => {
           try {
             this._importCrewLua(text);
+            this._syncConfigStatus();
           } catch (err) {
             alert('Failed to parse crew.lua: ' + err.message);
           }
@@ -370,165 +376,81 @@ export class UI {
       downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, headerComment, TAKEOFF_TASKS, PARKING_TASKS, toLabels, ldLabels);
     });
 
-    // ── Config I/O (folder-based) ──────────────────────────────────────
+    // ── Import folder (any browser: reads a folder, cannot save back to it) ──
     document.getElementById('btn-import-config').addEventListener('click', () => {
       const input = document.createElement('input');
       input.type = 'file';
       input.webkitdirectory = true;
-      input.addEventListener('change', () => {
+      input.addEventListener('change', async () => {
         const files = Array.from(input.files);
-        const crewFile = files.find(f => f.name === 'crew.lua');
-        const rrFile = files.find(f => f.name === 'USS_Nimitz_RunwaysAndRoutes.lua');
-        if (!crewFile && !rrFile) {
-          alert('No crew.lua or USS_Nimitz_RunwaysAndRoutes.lua found in selected folder.');
-          return;
-        }
-        const promises = [];
-        if (rrFile) promises.push(rrFile.text().then(text => {
-          const routes = parseTakeoffRoutes(text);
-          this.rs.loadTakeoffRoutes(routes);
-          // Parse landing routes
-          const landingRoutes = parseLandingRoutes(text);
-          if (landingRoutes) this.rs.loadLandingRoutes(landingRoutes);
-          // Parse elevators
-          const elevators = parseElevators(text);
-          if (elevators) this._loadElevators(elevators);
-          const blockers = parseBlockerTerminals(text);
-          if (blockers) this._loadBlockerTerminals(blockers);
-          this._originalLuaText = text;
-          this._rebuildRouteList();
-          const stamp = this._parseScConfigStamp(text);
-          if (stamp) this.rs.loadedVariant = stamp;
-        }));
-        if (crewFile) promises.push(crewFile.text().then(text => {
-          this._importCrewLua(text);
-        }));
-        Promise.all(promises).then(() => {
-          this.rs.refreshRouteSnapshots();
-          this.rs._notify();
-          const loaded = [rrFile && 'RunwaysAndRoutes', crewFile && 'crew.lua'].filter(Boolean).join(' + ');
-          console.log(`Config imported: ${loaded}`);
-        }).catch(err => {
+        // The picker also returns files in subfolders (Archive/, other configs):
+        // for each config file take the copy closest to the picked folder.
+        const depth = f => (f.webkitRelativePath || f.name).split('/').length;
+        const texts = {};
+        try {
+          for (const [key, fileName] of Object.entries(CONFIG_FILES)) {
+            const file = files.filter(f => f.name === fileName).sort((a, b) => depth(a) - depth(b))[0];
+            if (file) texts[key] = await file.text();
+          }
+          if (!texts.crew && !texts.rr) {
+            alert('No crew.lua or USS_Nimitz_RunwaysAndRoutes.lua found in the selected folder.');
+            return;
+          }
+          const fromDefault = this._loadConfig(texts);
+          this._loadedFolderConfig = null;
+          this._syncConfigStatus(this._defaultFilesNote(fromDefault));
+          console.log(`Config imported: ${Object.keys(texts).map(k => CONFIG_FILES[k]).join(' + ')}`);
+        } catch (err) {
           alert('Failed to import config: ' + err.message);
-        });
+        }
       });
       input.click();
     });
 
+    // ── Download package (any browser): the whole config as one install zip ──
     document.getElementById('btn-export-config').addEventListener('click', () => {
       if (!this._originalLuaText && !this._originalCrewLuaText) {
         alert('No files loaded yet.'); return;
       }
-      this._pendingSaveConfig = null; // ensure download path, not SC-Configs save
-      const form = document.getElementById('export-stamp-form');
-      const verInput = document.getElementById('export-stamp-ver');
-      // Pre-fill version from loaded variant (auto-increment)
-      const lv = this.rs.loadedVariant;
-      if (lv && lv.version) {
-        const m = lv.version.match(/^(v\d+\.)(\d+)$/);
-        verInput.value = m ? m[1] + (parseInt(m[2]) + 1) : lv.version;
-      } else {
-        verInput.value = 'v0.1';
-      }
-      document.getElementById('export-stamp-notes').value = this._lastStampNotes || '';
-      form.style.display = '';
+      this._openStampForm({ type: 'package' });
     });
 
+    // ── Version / notes form shared by Save, New and Download package ──────
     document.getElementById('btn-export-stamp-apply').addEventListener('click', async () => {
+      const action = this._pendingAction;
+      if (!action) return;
       if (this._originalCrewLuaText && !this._confirmTakeoffValidation()) return;
       const ver = document.getElementById('export-stamp-ver').value.trim();
       const notes = document.getElementById('export-stamp-notes').value.trim();
+      if (!ver) { alert('Enter a version, for example v0.1.'); return; }
       const lv = this.rs.loadedVariant;
-      const name = lv ? lv.name : 'Unknown';
+      let name = lv ? lv.name : 'Unknown';
+      if (action.type === 'new') {
+        name = document.getElementById('export-stamp-name').value.trim().replace(/\s+/g, '_');
+        const problem = await this._newConfigNameProblem(name);
+        if (problem) { alert(problem); return; }
+      }
       const date = new Date().toISOString().slice(0, 10);
       let stamp = `-- [SC-Config] ${name} ${ver}\n`;
       stamp += `-- [SC-Config] Modified: ${date}\n`;
       if (notes) stamp += `-- [SC-Config] Notes: ${notes}\n`;
 
-      const saveConfig = this._pendingSaveConfig;
-      this._pendingSaveConfig = null;
+      const done = action.type === 'package'
+        ? this._downloadPackage(name, ver, stamp)
+        : await this._saveToFolder(action.type === 'new' ? name : action.config, stamp, action.type === 'new');
+      if (!done) return;  // form stays open: nothing was recorded as saved
 
-      if (saveConfig) {
-        // SC-Configs Save path — write to folder
-        if (!CS.hasRoot()) {
-          const ok = await CS.restoreRootFolder(true);
-          if (!ok) { alert('Permission denied. Please re-select the SC-Configs folder.'); return; }
-        }
-        try {
-          // Extract version tag from existing file header for archiving
-          const versionRe = /--\s*\[SC-Config\]\s*\S+\s+(v[\d.]+)/;
-          const rrVersion = this._originalLuaText && (this._originalLuaText.match(versionRe) || [])[1];
-          const crewVersion = this._originalCrewLuaText && (this._originalCrewLuaText.match(versionRe) || [])[1];
-
-          if (this._originalLuaText) {
-            const patched = buildPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp,
-              this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
-            if (patched !== this._originalLuaText && rrVersion) {
-              await CS.archiveConfigFile(saveConfig, 'USS_Nimitz_RunwaysAndRoutes.lua', rrVersion);
-            }
-            await CS.writeConfigFile(saveConfig, 'USS_Nimitz_RunwaysAndRoutes.lua', patched);
-          }
-          const toLabels = this.rs.takeoffRoutes.map((r, i) => `TO ${i + 1}: ${r.label}`);
-          const ldLabels = this.rs.landingRoutes.map((r, i) => `Landing ${i + 1}: ${r.label}`);
-          if (this._originalCrewLuaText) {
-            this._enforceAllCatCrewHide();
-            this._enforceAllCatCrewHeights();
-            const patched = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
-              CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS, toLabels, ldLabels);
-            if (patched !== this._originalCrewLuaText && crewVersion) {
-              await CS.archiveConfigFile(saveConfig, 'crew.lua', crewVersion);
-            }
-            await CS.writeConfigFile(saveConfig, 'crew.lua', patched);
-          }
-          // Patch GroundCrew.lua with disable state
-          if (this._originalGroundCrewText) {
-            const gcPatched = this._patchGroundCrewDisable(this._originalGroundCrewText);
-            await CS.writeConfigFile(saveConfig, 'GroundCrew.lua', gcPatched);
-            this._originalGroundCrewText = gcPatched;
-          }
-          const saved = [this._originalLuaText && 'RunwaysAndRoutes', this._originalCrewLuaText && 'crew.lua'].filter(Boolean).join(' + ');
-          console.log(`Config saved to ${saveConfig}: ${saved}`);
-          // Reset baselines so "edited" flag clears
-          if (this._originalLuaText) {
-            this._originalLuaText = buildPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp,
-              this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
-            this.rs.refreshRouteSnapshots();
-          }
-          if (this._originalCrewLuaText) {
-            this._originalCrewLuaText = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
-              CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS, toLabels, ldLabels);
-            this.rs.refreshCrewSnapshots();
-            this.rs.refreshCatCrewSnapshots();
-          }
-          this._update();
-          const saveBtn = document.getElementById('btn-save-config');
-          saveBtn.textContent = '✓ Saved';
-          setTimeout(() => { saveBtn.textContent = 'Save'; }, 1500);
-        } catch (err) {
-          alert('Failed to save config: ' + err.message);
-        }
-      } else {
-        // Download path — export as file downloads
-        if (this._originalLuaText) {
-          downloadPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp, this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
-        }
-        if (this._originalCrewLuaText) {
-          this._enforceAllCatCrewHide();
-          this._enforceAllCatCrewHeights();
-          const toLabels2 = this.rs.takeoffRoutes.map((r, i) => `TO ${i + 1}: ${r.label}`);
-          const ldLabels2 = this.rs.landingRoutes.map((r, i) => `Landing ${i + 1}: ${r.label}`);
-          downloadPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES, CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS, toLabels2, ldLabels2);
-        }
-      }
+      this._pendingAction = null;
       // Update loaded variant and save notes for next export
       this.rs.loadedVariant = { name, version: ver };
       this._lastStampNotes = notes;
       this.rs._notify();
       document.getElementById('export-stamp-form').style.display = 'none';
+      this._syncConfigStatus(this._lastActionNote);
     });
 
     document.getElementById('btn-export-stamp-cancel').addEventListener('click', () => {
-      this._pendingSaveConfig = null;
+      this._pendingAction = null;
       document.getElementById('export-stamp-form').style.display = 'none';
     });
 
@@ -963,6 +885,267 @@ export class UI {
     }
   }
 
+  // ── Config load / save ─────────────────────────────────────────────────
+
+  /** Parse a RunwaysAndRoutes.lua text into the editor: routes, elevators, blocker terminals. */
+  _applyRoutesLua(text) {
+    const routes = parseTakeoffRoutes(text);
+    this.rs.loadTakeoffRoutes(routes);
+    const landingRoutes = parseLandingRoutes(text);
+    if (landingRoutes) this.rs.loadLandingRoutes(landingRoutes);
+    const elevators = parseElevators(text);
+    if (elevators) this._loadElevators(elevators);
+    const blockers = parseBlockerTerminals(text);
+    if (blockers) this._loadBlockerTerminals(blockers);
+    this._originalLuaText = text;
+    this._rebuildRouteList();
+    // Parse SC-Config stamp for version overlay
+    const stamp = this._parseScConfigStamp(text);
+    if (stamp) this.rs.loadedVariant = stamp;
+  }
+
+  /**
+   * Load a complete config from file texts (keys as in CONFIG_FILES).
+   * A file the source lacks is taken from the built-in default set, so the
+   * editor never keeps a file from the config that was loaded before.
+   * @param {Object<string,string|null|undefined>} texts
+   * @returns {string[]} names of the files that came from the default set
+   */
+  _loadConfig(texts) {
+    const defaults = this._defaultConfig || {};
+    const fromDefault = [];
+    const pick = key => {
+      if (texts[key]) return texts[key];   // an empty file counts as missing
+      if (defaults[key]) { fromDefault.push(CONFIG_FILES[key]); return defaults[key]; }
+      return null;
+    };
+    const rr = pick('rr');
+    const crew = pick('crew');
+    const groundCrew = pick('groundCrew');
+    this._commonXmlText = pick('common');
+    this._commonDisabledXmlText = pick('commonDisabled');
+
+    this._catCrewHidden = [false, false, false, false];
+    if (rr) this._applyRoutesLua(rr);
+    if (crew) this._importCrewLua(crew);
+
+    // A catapult is disabled when GroundCrew.lua points its crew at common_disabled.xml
+    this._originalGroundCrewText = groundCrew;
+    this._catCrewDisabled = [false, false, false, false];
+    if (groundCrew) {
+      const disabledRe = /crew\[(\d)\]\.behavior\s*=\s*'[^']*common_disabled\.xml'/g;
+      let m;
+      while ((m = disabledRe.exec(groundCrew)) !== null) {
+        const catIdx = parseInt(m[1]) - 1;  // crew[1] → index 0
+        if (catIdx >= 0 && catIdx < 4) this._catCrewDisabled[catIdx] = true;
+      }
+    }
+
+    // Name and version shown on the canvas: the source's own files when it has them
+    const stampText = texts.crew || texts.rr || crew || rr;
+    this.rs.loadedVariant = stampText ? this._parseScConfigStamp(stampText) : null;
+
+    this._syncCatCrewPanel();
+    this._syncCatCrewCanvasWarning();
+    this.rs.refreshRouteSnapshots();
+    this.rs.clearUndoHistory();
+    this.rs._notify();
+    return fromDefault;
+  }
+
+  /**
+   * Build the file texts of the config as it stands on screen.
+   * @param {string} stamp "[SC-Config]" header lines for the two Lua files the editor edits
+   * @returns {Object<string,string>} texts keyed like CONFIG_FILES; a key is absent when the editor holds no such file
+   */
+  _buildConfigTexts(stamp) {
+    const texts = {};
+    if (this._originalLuaText) {
+      texts.rr = buildPatchedLua(this._originalLuaText, this.rs.takeoffRoutes, stamp,
+        this.rs.elevatorTypes, [...this.rs.blockerTerminals], this.rs.landingRoutes);
+    }
+    if (this._originalCrewLuaText) {
+      this._enforceAllCatCrewHide();
+      this._enforceAllCatCrewHeights();
+      const toLabels = this.rs.takeoffRoutes.map((r, i) => `TO ${i + 1}: ${r.label}`);
+      const ldLabels = this.rs.landingRoutes.map((r, i) => `Landing ${i + 1}: ${r.label}`);
+      texts.crew = buildPatchedCrewLua(this._originalCrewLuaText, CREW_MEMBERS, CREW_ROUTES,
+        CATAPULT_CREWS, this.rs._originalCatCrews, stamp, TAKEOFF_TASKS, PARKING_TASKS, toLabels, ldLabels);
+    }
+    if (this._originalGroundCrewText) texts.groundCrew = this._patchGroundCrewDisable(this._originalGroundCrewText);
+    if (this._commonXmlText) texts.common = this._commonXmlText;
+    if (this._commonDisabledXmlText) texts.commonDisabled = this._commonDisabledXmlText;
+    return texts;
+  }
+
+  /**
+   * Show the version / notes form for an action that writes a new version:
+   *   { type: 'save', config }  write into that config folder
+   *   { type: 'new' }           create a config folder from what is on screen
+   *   { type: 'package' }       download an install package
+   */
+  _openStampForm(action) {
+    this._pendingAction = action;
+    const isNew = action.type === 'new';
+    const lv = this.rs.loadedVariant;
+
+    document.getElementById('export-stamp-name-group').style.display = isNew ? '' : 'none';
+    const nameInput = document.getElementById('export-stamp-name');
+    if (isNew) nameInput.value = '';
+
+    const verInput = document.getElementById('export-stamp-ver');
+    if (isNew) {
+      verInput.value = 'v0.1';
+    } else if (lv && lv.version) {
+      // Pre-fill with the next minor version
+      const m = lv.version.match(/^(v\d+\.)(\d+)$/);
+      verInput.value = m ? m[1] + (parseInt(m[2]) + 1) : lv.version;
+    } else {
+      verInput.value = 'v0.1';
+    }
+    document.getElementById('export-stamp-notes').value = isNew
+      ? (lv ? `Created from ${lv.name}${lv.version ? ' ' + lv.version : ''}` : '')
+      : (this._lastStampNotes || '');
+
+    document.getElementById('export-stamp-title').textContent =
+      isNew ? 'New config' : action.type === 'save' ? `Save to ${action.config}` : 'Download package';
+    document.getElementById('btn-export-stamp-apply').textContent =
+      isNew ? 'Create' : action.type === 'save' ? 'Save' : 'Download';
+    document.getElementById('export-stamp-form').style.display = '';
+    (isNew ? nameInput : verInput).focus();
+  }
+
+  /** Why a name cannot be used for a new config, or '' if it can. */
+  async _newConfigNameProblem(name) {
+    if (!name) return 'Enter a name for the new config.';
+    if (!/^[A-Za-z0-9_-]+$/.test(name)) return 'Use only letters, numbers, dashes and underscores in the name.';
+    if (name === '_output' || name === 'Archive') return `"${name}" is a reserved folder name.`;
+    if (!CS.hasRoot() && !(await CS.restoreRootFolder(true))) return 'Permission denied. Please choose the config folder again.';
+    if (await CS.configExists(name)) return `A folder named "${name}" already exists. Pick another name, or select it and use Save.`;
+    return '';
+  }
+
+  /**
+   * Write the config on screen into a config folder.
+   * The two Lua files and GroundCrew.lua are always written. The two XML
+   * files, which the editor never edits, are only added when the folder
+   * lacks them — an existing one is never overwritten.
+   * @returns {Promise<boolean>} true when everything was written
+   */
+  async _saveToFolder(configName, stamp, isNew) {
+    if (!CS.hasRoot()) {
+      const ok = await CS.restoreRootFolder(true);
+      if (!ok) { alert('Permission denied. Please choose the config folder again.'); return false; }
+    }
+    try {
+      if (isNew) await CS.createConfig(configName);
+      const texts = this._buildConfigTexts(stamp);
+
+      // The version being replaced goes to Archive/ (tag = version in the loaded file's header)
+      const versionRe = /--\s*\[SC-Config\]\s*\S+\s+(v[\d.]+)/;
+      for (const [key, baseline] of [['rr', this._originalLuaText], ['crew', this._originalCrewLuaText]]) {
+        if (texts[key] == null) continue;
+        const oldVersion = (baseline.match(versionRe) || [])[1];
+        if (!isNew && oldVersion && texts[key] !== baseline) {
+          await CS.archiveConfigFile(configName, CONFIG_FILES[key], oldVersion);
+        }
+        await CS.writeConfigFile(configName, CONFIG_FILES[key], texts[key]);
+      }
+      if (texts.groundCrew != null) {
+        await CS.writeConfigFile(configName, CONFIG_FILES.groundCrew, texts.groundCrew);
+      }
+      const added = [];
+      for (const key of ['common', 'commonDisabled']) {
+        if (texts[key] == null || await CS.configFileExists(configName, CONFIG_FILES[key])) continue;
+        await CS.writeConfigFile(configName, CONFIG_FILES[key], texts[key]);
+        added.push(CONFIG_FILES[key]);
+      }
+      console.log(`Config saved to ${configName}: ${Object.keys(texts).map(k => CONFIG_FILES[k]).join(' + ')}`
+        + (added.length ? ` (added ${added.join(', ')})` : ''));
+
+      // What was written becomes the baseline, so the "edited" flag clears
+      if (texts.rr != null) {
+        this._originalLuaText = texts.rr;
+        this.rs.refreshRouteSnapshots();
+      }
+      if (texts.crew != null) {
+        this._originalCrewLuaText = texts.crew;
+        this.rs.refreshCrewSnapshots();
+        this.rs.refreshCatCrewSnapshots();
+      }
+      if (texts.groundCrew != null) this._originalGroundCrewText = texts.groundCrew;
+      this._loadedFolderConfig = configName;
+      this._update();
+
+      if (isNew) {
+        await this._refreshConfigList();
+        const select = document.getElementById('sc-config-select');
+        select.value = configName;
+        select.dispatchEvent(new Event('change'));
+      }
+      this._lastActionNote = `saved to ${configName}` + (added.length ? `, ${added.join(' and ')} added` : '');
+      const saveBtn = document.getElementById('btn-save-config');
+      saveBtn.textContent = '✓ Saved';
+      setTimeout(() => { saveBtn.textContent = 'Save'; }, 1500);
+      return true;
+    } catch (err) {
+      alert('Failed to save config: ' + err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Download the config on screen as one install package (zip).
+   * @returns {boolean} true when the download was started
+   */
+  _downloadPackage(name, version, stamp) {
+    try {
+      const texts = this._buildConfigTexts(stamp);
+      const files = Object.entries(CONFIG_FILES)
+        .filter(([key]) => texts[key] != null)
+        .map(([key, fileName]) => ({ name: fileName, text: texts[key] }));
+      const pkg = buildOmmPackage({ configName: name, version, files });
+      downloadBytes(pkg.bytes, pkg.fileName);
+      this._lastActionNote = `${pkg.fileName} downloaded (${files.length} files)`;
+      return true;
+    } catch (err) {
+      alert('Failed to build the package: ' + err.message);
+      return false;
+    }
+  }
+
+  /** Status note naming the files that came from the built-in default set. */
+  _defaultFilesNote(fromDefault) {
+    if (!fromDefault.length) return '';
+    return `${fromDefault.join(', ')} not found there: the editor's built-in ${fromDefault.length > 1 ? 'copies are' : 'copy is'} used`;
+  }
+
+  /** Files tab status line: what the editor holds, plus a note about the last action. */
+  _syncConfigStatus(note = '') {
+    const el = document.getElementById('config-status');
+    if (!el) return;
+    let text;
+    if (!this._originalLuaText && !this._originalCrewLuaText) {
+      text = 'No config files loaded. Import your own files to be able to export.';
+    } else {
+      const lv = this.rs.loadedVariant;
+      text = lv ? `Loaded: ${lv.name}${lv.version ? ' ' + lv.version : ''}` : 'Loaded: config without a version stamp';
+    }
+    el.textContent = note ? `${text} — ${note}` : text;
+  }
+
+  /** Files tab hint: a disabled catapult needs more than the two Lua files. */
+  _syncDisableNote() {
+    const el = document.getElementById('files-disable-note');
+    if (!el) return;
+    const cats = this._catCrewDisabled.map((on, i) => on ? i + 1 : 0).filter(Boolean);
+    el.style.display = cats.length ? '' : 'none';
+    if (cats.length) {
+      el.textContent = `Cat ${cats.join(', ')} disabled: this also needs GroundCrew.lua and common_disabled.xml. `
+        + 'Use a package or a config folder — the two exported Lua files alone will not disable it.';
+    }
+  }
+
   _parseScConfigStamp(text) {
     // Try versioned format: Name v1.0
     const mv = text.match(/^--\s*\[SC-Config\]\s+(\S+)\s+(v\S+)/m);
@@ -979,32 +1162,37 @@ export class UI {
     return { name: m[1].trim(), version: '' };
   }
 
-  // ── SC-Configs folder store ────────────────────────────────────────────
+  // ── Config folder (File System Access API: Chrome / Edge) ─────────────
+  // One folder on disk, one subfolder per config. An SC-Configs folder made
+  // with the SC-Config toolkit has exactly this layout.
 
   async _initConfigStore() {
-    const scBtn = document.getElementById('btn-set-sc-folder');
+    const folderBtn = document.getElementById('btn-set-sc-folder');
     const label = document.getElementById('sc-folder-label');
     const select = document.getElementById('sc-config-select');
+    const newBtn = document.getElementById('btn-new-config');
     const loadBtn = document.getElementById('btn-load-config');
     const saveBtn = document.getElementById('btn-save-config');
+    const packageBtn = document.getElementById('btn-build-package');
 
     if (!CS.isSupported()) {
-      scBtn.style.display = 'none';
-      label.textContent = 'File System Access API not supported';
+      folderBtn.style.display = 'none';
+      label.textContent = 'Not available in this browser: it needs Chrome or Edge. Use "File by file" below.';
       return;
     }
 
     // Visual state helper — highlights button when no root is set
     const updateRootVisual = () => {
       if (CS.hasRoot()) {
-        scBtn.classList.remove('needs-attention');
+        folderBtn.classList.remove('needs-attention');
         label.textContent = CS.getRootName();
         label.style.color = '';
       } else {
-        scBtn.classList.add('needs-attention');
-        label.textContent = 'No folder set — click to select SC-Configs root';
+        folderBtn.classList.add('needs-attention');
+        label.textContent = 'No folder chosen — pick any folder, even an empty one, to keep your configs in';
         label.style.color = '#c0392b';
       }
+      newBtn.disabled = !CS.hasRoot();
     };
 
     // Try to restore saved folder handle (no permission prompt yet)
@@ -1014,17 +1202,16 @@ export class UI {
     }
     updateRootVisual();
 
-    // Set SC-Configs folder button
-    scBtn.addEventListener('click', async () => {
+    // Choose folder button
+    folderBtn.addEventListener('click', async () => {
       try {
         await CS.pickRootFolder();
         updateRootVisual();
-        console.log('[SC-Config] Root folder set:', CS.getRootName());
+        console.log('[config-folder] Folder set:', CS.getRootName());
         await this._refreshConfigList();
-        console.log('[SC-Config] Config list refreshed, options:', select.options.length - 1);
       } catch (err) {
         if (err.name !== 'AbortError') {
-          console.error('[SC-Config] pickRootFolder error:', err);
+          console.error('[config-folder] pickRootFolder error:', err);
           alert('Failed to set folder: ' + err.message);
         }
       }
@@ -1035,10 +1222,19 @@ export class UI {
       const name = select.value;
       loadBtn.disabled = !name;
       saveBtn.disabled = !name;
+      packageBtn.disabled = !name;
       if (name) CS.setActiveConfig(name);
     });
 
-    // Load button
+    // New button — saves what is on screen as a new config in the folder
+    newBtn.addEventListener('click', () => {
+      if (!this._originalLuaText && !this._originalCrewLuaText) {
+        alert('No files loaded yet.'); return;
+      }
+      this._openStampForm({ type: 'new' });
+    });
+
+    // Load button — reads the five files of the selected config
     loadBtn.addEventListener('click', async () => {
       const name = select.value;
       if (!name) return;
@@ -1046,72 +1242,69 @@ export class UI {
         // Re-request permission if needed (user gesture context)
         if (!CS.hasRoot()) {
           const ok = await CS.restoreRootFolder(true);
-          if (!ok) { alert('Permission denied. Please re-select the SC-Configs folder.'); return; }
+          if (!ok) { alert('Permission denied. Please choose the config folder again.'); return; }
         }
-        const rrText = await CS.readConfigFile(name, 'USS_Nimitz_RunwaysAndRoutes.lua');
-        const crewText = await CS.readConfigFile(name, 'crew.lua');
-        const gcText = await CS.readConfigFile(name, 'GroundCrew.lua').catch(() => null);
-        if (!rrText && !crewText) { alert('No .lua files found in ' + name); return; }
-        if (rrText) {
-          const routes = parseTakeoffRoutes(rrText);
-          this.rs.loadTakeoffRoutes(routes);
-          const landingRoutes = parseLandingRoutes(rrText);
-          if (landingRoutes) this.rs.loadLandingRoutes(landingRoutes);
-          const elevators = parseElevators(rrText);
-          if (elevators) this._loadElevators(elevators);
-          const blockers = parseBlockerTerminals(rrText);
-          if (blockers) this._loadBlockerTerminals(blockers);
-          this._originalLuaText = rrText;
-          this._rebuildRouteList();
-          const stamp = this._parseScConfigStamp(rrText);
-          if (stamp) this.rs.loadedVariant = stamp;
+        const texts = {};
+        for (const [key, fileName] of Object.entries(CONFIG_FILES)) {
+          texts[key] = await CS.readConfigFile(name, fileName);
         }
-        if (crewText) {
-          this._importCrewLua(crewText);
+        if (!texts.rr && !texts.crew) {
+          alert(`No crew.lua or USS_Nimitz_RunwaysAndRoutes.lua found in ${name}.`);
+          return;
         }
-        // Detect disabled catapults from GroundCrew.lua behavior paths
-        this._catCrewDisabled = [false, false, false, false];
-        if (gcText) {
-          this._originalGroundCrewText = gcText;
-          const disabledRe = /crew\[(\d)\]\.behavior\s*=\s*'[^']*common_disabled\.xml'/g;
-          let m;
-          while ((m = disabledRe.exec(gcText)) !== null) {
-            const catIdx = parseInt(m[1]) - 1;  // crew[1] → index 0
-            if (catIdx >= 0 && catIdx < 4) this._catCrewDisabled[catIdx] = true;
-          }
-        }
-        this._syncCatCrewPanel();
-        this._syncCatCrewCanvasWarning();
-        this.rs.refreshRouteSnapshots();
-        this.rs._notify();
+        const fromDefault = this._loadConfig(texts);
         CS.setActiveConfig(name);
-        const loaded = [rrText && 'RunwaysAndRoutes', crewText && 'crew.lua'].filter(Boolean).join(' + ');
-        console.log(`Config loaded from ${name}: ${loaded}`);
+        this._loadedFolderConfig = name;
+        const note = this._defaultFilesNote(fromDefault);
+        this._syncConfigStatus(note ? `${note}; Save adds ${fromDefault.length > 1 ? 'them' : 'it'} to the folder` : '');
+        console.log(`Config loaded from ${name}: ${Object.keys(texts).filter(k => texts[k]).map(k => CONFIG_FILES[k]).join(' + ')}`);
       } catch (err) {
         alert('Failed to load config: ' + err.message);
       }
     });
 
-    // Save button — opens stamp form then writes to selected config folder
+    // Save button — version / notes form, then writes to the selected config folder
     saveBtn.addEventListener('click', () => {
       const name = select.value;
       if (!name) return;
       if (!this._originalLuaText && !this._originalCrewLuaText) {
         alert('No files loaded yet.'); return;
       }
-      // Show stamp form — _pendingSaveConfig tells Apply handler to save to SC-Configs
-      this._pendingSaveConfig = name;
-      const form = document.getElementById('export-stamp-form');
-      const verInput = document.getElementById('export-stamp-ver');
-      const lv = this.rs.loadedVariant;
-      if (lv && lv.version) {
-        const m = lv.version.match(/^(v\d+\.)(\d+)$/);
-        verInput.value = m ? m[1] + (parseInt(m[2]) + 1) : lv.version;
-      } else {
-        verInput.value = 'v0.1';
+      this._openStampForm({ type: 'save', config: name });
+    });
+
+    // Build package button — zips the saved files of the selected config
+    packageBtn.addEventListener('click', async () => {
+      const name = select.value;
+      if (!name) return;
+      try {
+        if (!CS.hasRoot()) {
+          const ok = await CS.restoreRootFolder(true);
+          if (!ok) { alert('Permission denied. Please choose the config folder again.'); return; }
+        }
+        const files = [];
+        const missing = [];
+        for (const fileName of Object.values(CONFIG_FILES)) {
+          const text = await CS.readConfigFile(name, fileName);
+          if (text) files.push({ name: fileName, text }); else missing.push(fileName);
+        }
+        if (missing.length) {
+          alert(`${name} has no ${missing.join(', ')}.\n\nLoad it and click Save once — Save adds the missing files — then build the package.`);
+          return;
+        }
+        if (name === this._loadedFolderConfig && this.rs.isAnythingModified() &&
+            !confirm('The package is built from the saved files, so your unsaved edits will not be in it.\n\nBuild it anyway?')) {
+          return;
+        }
+        // Version as stamped in the saved crew.lua
+        const crewText = files.find(f => f.name === CONFIG_FILES.crew).text;
+        const m = crewText.match(/^--\s*\[SC-Config\]\s+\S+\s+(v\S+)/m);
+        const pkg = buildOmmPackage({ configName: name, version: m ? m[1] : 'v0.0', files });
+        downloadBytes(pkg.bytes, pkg.fileName);
+        this._syncConfigStatus(`${pkg.fileName} built from the saved files of ${name}`);
+      } catch (err) {
+        alert('Failed to build the package: ' + err.message);
       }
-      document.getElementById('export-stamp-notes').value = this._lastStampNotes || '';
-      form.style.display = '';
     });
   }
 
@@ -1119,11 +1312,16 @@ export class UI {
     const select = document.getElementById('sc-config-select');
     const loadBtn = document.getElementById('btn-load-config');
     const saveBtn = document.getElementById('btn-save-config');
+    const packageBtn = document.getElementById('btn-build-package');
     try {
       const configs = await CS.listConfigs();
-      console.log('[SC-Config] Found configs:', configs);
+      console.log('[config-folder] Found configs:', configs);
       // Clear and repopulate
-      select.innerHTML = '<option value="">— select config —</option>';
+      select.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = configs.length ? '— select config —' : '— no config yet: click New —';
+      select.appendChild(placeholder);
       for (const name of configs) {
         const opt = document.createElement('option');
         opt.value = name;
@@ -1133,13 +1331,13 @@ export class UI {
       select.disabled = configs.length === 0;
       // Restore last selection
       const last = CS.getLastConfig();
-      if (last && configs.includes(last)) {
-        select.value = last;
-        loadBtn.disabled = false;
-        saveBtn.disabled = false;
-      }
+      const hasLast = !!last && configs.includes(last);
+      if (hasLast) select.value = last;
+      loadBtn.disabled = !hasLast;
+      saveBtn.disabled = !hasLast;
+      packageBtn.disabled = !hasLast;
     } catch (err) {
-      console.error('[SC-Config] Failed to list configs:', err);
+      console.error('[config-folder] Failed to list configs:', err);
       select.disabled = true;
     }
   }
@@ -2970,6 +3168,7 @@ export class UI {
       }
     }
     this._syncCatCrewCanvasWarning();
+    this._syncDisableNote();
   }
 
   /** Set all h values for a catapult's crew to deck height or sea level. */
@@ -3146,8 +3345,30 @@ export class UI {
     }
   }
 
-  /** First paint. */
-  boot() {
+  /**
+   * First paint.
+   * @param {Object<string,string>|null} defaultConfig built-in default set
+   *   (see default-config.js), or null if it could not be fetched — the editor
+   *   then shows the data tables compiled into the JS modules and can only
+   *   export after an import.
+   */
+  boot(defaultConfig = null) {
+    this._defaultConfig = defaultConfig;
     this._resize();
+    let note = '';
+    if (defaultConfig) {
+      try {
+        this._loadConfig({});
+        // Same first view as before: takeoff routes shown, landing routes hidden
+        this.rs.setAllLandingRoutes(false);
+        note = 'built-in default';
+      } catch (err) {
+        console.error('[default-config] could not apply the built-in config —', err);
+        note = 'the built-in default config could not be read';
+      }
+    } else {
+      note = 'the built-in default config could not be loaded';
+    }
+    this._syncConfigStatus(note);
   }
 }

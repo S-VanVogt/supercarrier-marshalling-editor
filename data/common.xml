@@ -1,0 +1,712 @@
+<?xml version="1.0"?>
+<!-- [SC-Config] initial v0.0 -->
+<!-- [SC-Config] Modified: 2026-11-18 -->
+<!-- [SC-Config] Author: VV -->
+<!-- [SC-Config] Notes: Marshalling editor default set: VV_AdjAllcats v1.4 + common_disabled.xml -->
+<root main_tree_to_execute="BehaviorTree">
+    <!-- ////////// -->
+    <BehaviorTree ID="BehaviorTree">
+        <SequenceStar name="Phase">
+            <SequenceStar name="Initial coditions">
+                <SequenceStar name="Reset Requests">
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_SAFE" attribute_value="false"/>
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE" attribute_value="true"/>
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_MOVE_FORWARD_WITH_LOW_LAUNCHBAR" attribute_value="false"/>
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CHECK_AIRCRAFT_CONTROLS" attribute_value="false"/>
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_WINGS_UNFOLD" attribute_value="false"/>
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_TAKEOFF" attribute_value="false"/>
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_SHUTTLE_TENSION" attribute_value="false"/>
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_AFTERBURN" attribute_value="false"/>
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_LOWER_LAUNCHBAR" attribute_value="false"/>
+                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_LARGE_WINGSPAN" attribute_value="false"/>
+                </SequenceStar>
+                <SetBlackboard output_key="first_phase_complete" value="0"/>
+                <Action ID="GetConfigValue" blackboard_key_name="takeoff_distance" param_name="takeoff_distance" param_type="float"/>
+                <Action ID="GetConfigValue" blackboard_key_name="shuttle_tension_condition" param_name="shuttle_tension_condition" param_type="float"/>
+                <Action ID="GetConfigValue" blackboard_key_name="shuttle_dist" param_name="shuttle_dist" param_type="float"/>
+                <Action ID="OverrideAnimation" enabled="true" member_name="green_hbb" override_animation_name="holdback_bar_arm"/>
+                <Action ID="ShowAttachment" attachment_name="HBB" delay="0" member_name="green_hbb" visible="true"/>
+				<Action ID="SetAttachmentArgument" argument_id="15" argument_value="0" attachment_name="HBB" member_name="green_hbb"/>
+                <Action ID="ShowShipHBB" flag="false"/>
+				<ForceSuccess>
+					<SubTree ID="SetNightModeAttachments"/>
+				</ForceSuccess>
+				<Action ID="SetCustomBBBool" name="night mode" param_name="night_mode" param_value="{night_mode}"/>
+				<ForceSuccess>
+					<SubTree ID="SetCrewIdle"/>
+				</ForceSuccess>
+            </SequenceStar>
+            <Sequence name="Conditions check">
+				<ForceSuccess name="Free/Occupy cat">
+					<Decorator ID="BlackboardCheckBool" name="check LA not assigned" return_on_mismatch="FAILURE" value_A="{la_assigned}" value_B="false">
+						<Sequence name="Free/Occupy cat">
+							<ForceSuccess name="Free cat">
+								<SequenceStar name="Free Catapult">
+									<Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_SAFE" attribute_value="false" catapult="self" name="GC_REQUEST_CREW_SAFE == false?"/>
+									<Condition ID="CheckGCOrder" attribute_name="GC_ORDER_FREE_CATAPULT" attribute_value="true" catapult="self" name="GC_ORDER_FREE_CATAPULT == true?"/>
+									<Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE" attribute_value="false" name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE = false"/>
+									<!-- Staggered crew departure (free) -->
+									<Action ID="Move" member_name="green_hbb" name="green_hbb free cat" output_key_name="green_hbb_status" route_id="4" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Pause" delay="0.12" random_spread="0"/>
+									<Action ID="Move" member_name="shooter" name="shooter free cat" output_key_name="shooter_status" route_id="2" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Pause" delay="0.08" random_spread="0"/>
+									<Action ID="Move" member_name="director" name="director free cat" output_key_name="director_status" route_id="2" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Pause" delay="0.05" random_spread="0"/>
+									<Action ID="Move" member_name="white2" name="white2 free cat" output_key_name="white2_status" route_id="3" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Pause" delay="0.11" random_spread="0"/>
+									<Action ID="Move" member_name="white1" name="white1 free cat" output_key_name="white1_status" route_id="3" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Move" member_name="green_nw" name="green_nw free cat" output_key_name="green_nw_status" route_id="3" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<!-- Wait for all crew to arrive -->
+									<Parallel name="wait free catapults" threshold="6">
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{shooter_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{director_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{white1_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{white2_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{green_hbb_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{green_nw_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+									</Parallel>
+									<SubTree ID="SetCrewIdle"/>
+									<Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_SAFE" attribute_value="true" name="GC_REQUEST_CREW_SAFE = true"/>
+								</SequenceStar>
+							</ForceSuccess>
+							<ForceSuccess name="Occupy Cat">
+								<SequenceStar name="Occupy catapult">
+									<Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_SAFE" attribute_value="true" catapult="self" name="GC_REQUEST_CREW_SAFE == true?"/>
+									<Condition ID="CheckGCOrder" attribute_name="GC_ORDER_TAKE_CATAPULT" attribute_value="true" catapult="self" name="GC_ORDER_TAKE_CATAPULT == true?"/>
+									<Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_SAFE" attribute_value="false" name="GC_REQUEST_CREW_SAFE = false"/>
+									<!-- Staggered crew departure (occupy) -->
+									<Action ID="Move" member_name="green_hbb" name="green_hbb occupy catapult" output_key_name="green_hbb_status" route_id="5" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Pause" delay="0.09" random_spread="0"/>
+									<Action ID="Move" member_name="shooter" name="shooter occupy catapult" output_key_name="shooter_status" route_id="3" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Pause" delay="0.11" random_spread="0"/>
+									<Action ID="Move" member_name="director" name="director occupy catapult" output_key_name="director_status" route_id="3" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Pause" delay="0.07" random_spread="0"/>
+									<Action ID="Move" member_name="white2" name="White2 Occupy catapult" output_key_name="white2_status" route_id="4" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Pause" delay="0.13" random_spread="0"/>
+									<Action ID="Move" member_name="white1" name="White1 Occupy catapult" output_key_name="white1_status" route_id="4" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<Action ID="Move" member_name="green_nw" name="green_nw occupy catapult" output_key_name="green_nw_status" route_id="4" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<!-- Wait for all crew to arrive -->
+									<Parallel name="wait occupy catapult" threshold="6">
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{shooter_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{director_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{white1_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{white2_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{green_hbb_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+										<BlackboardCheckString return_on_mismatch="FAILURE" value_A="{green_nw_status}" value_B="ready"><AlwaysSuccess/></BlackboardCheckString>
+									</Parallel>
+									<SubTree ID="SetCrewIdle"/>
+									<Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE" attribute_value="true" name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE = true"/>
+								</SequenceStar>
+							</ForceSuccess>
+						</Sequence>
+					</Decorator>
+				</ForceSuccess>
+                <ForceSuccess>
+                    <SequenceStar name="Wait LA">
+                        <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE" attribute_value="true" catapult="self" name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE"/>
+                        <Condition ID="CheckLA" output_key_name="la_assigned"/>
+                        <ForceSuccess>
+                            <SubTree ID="SetNightModeAttachments"/>
+                        </ForceSuccess>
+						<Action ID="SetCustomBBBool" name="night mode" param_name="night_mode" param_value="{night_mode}"/>
+                        <ForceSuccess>
+                            <Action ID="CheckCrewDataBool" condition="equal" name="large_wingspan == true?" output_bb_key="large_wingspan" param_name="large_wingspan" param_value="true"/>
+                        </ForceSuccess>
+                        <ForceSuccess>
+                            <Condition ID="CheckRunwayStart" output_key_name="runway_start"/>
+                        </ForceSuccess>
+                    </SequenceStar>
+                </ForceSuccess>
+                <Decorator ID="BlackboardCheckBool" name="la_assigned" return_on_mismatch="FAILURE" value_A="{la_assigned}" value_B="true">
+                    <SequenceStar name="Aircraft in service">
+                        <Decorator ID="BlackboardCheckBool" name="runway_start == true?" return_on_mismatch="SUCCESS" value_A="{runway_start}" value_B="true">
+                            <SubTree ID="TeleportCrew"/>
+                        </Decorator>
+                        <Decorator ID="BlackboardCheckBool" name="runway_start ==false?" return_on_mismatch="SUCCESS" value_A="{runway_start}" value_B="false">
+                            <Sequence name="Check service box and proceed">
+                                <ForceSuccess>
+                                    <Sequence name="Check unit in service area">
+                                        <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_SHUTTLE_TENSION" attribute_value="false" catapult="self" name="GC_REQUEST_HOLDBACKBAR_ATTACHED == false?"/>
+                                        <Action ID="CheckCrewDataBool" condition="equal" name="Check LA out of service box" output_bb_key="" param_name="ac_in_service_box" param_value="false"/>
+                                        <Action ID="BlockMasterCatapult" name="UnBlock Master Catapult" value="true"/>
+                                    </Sequence>
+                                </ForceSuccess>
+                                <SequenceStar name="Regular Start">
+                                    <!-- <Condition ID="WaitAcInVolume"/> -->
+                                    <SequenceStar name="Check operation allowed">
+                                        <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_CAN_TAXI" attribute_value="false" name="GC_REQUEST_CREW_CAN_TAXI = false"/>
+                                        <ForceSuccess>
+                                            <Sequence name="First cat check">
+                                                <Condition ID="CheckGCOrder" attribute_name="GC_ORDER_OPERATION_ALLOWED" attribute_value="false" catapult="self" name="GC_ORDER_OPERATION_ALLOWED == false?"/>
+                                                <Action ID="MessageNode" duration="15" message="Cat 4 blocking start. Please wait"/>
+                                            </Sequence>
+                                        </ForceSuccess>
+                                        <Condition ID="CheckGCOrder" attribute_name="GC_ORDER_OPERATION_ALLOWED" attribute_value="true" catapult="self" name="GC_ORDER_OPERATION_ALLOWED == true?"/>
+                                        <!-- <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_LARGE_WINGSPAN" attribute_value="false" catapult="neighbour" name="GC_REQUEST_LARGE_WINGSPAN == false on master?"/> -->
+                                        <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_CAN_TAXI" attribute_value="true" name="GC_REQUEST_CREW_CAN_TAXI = true"/>
+                                        <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE" attribute_value="false" name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE = false"/>
+                                        <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="true" name="GC_REQUEST_CREW_BUSY = true"/>
+                                        <Action ID="BlockMasterCatapult" value="false"/>
+                                    </SequenceStar>
+                                    <Action ID="Move" member_name="shooter" output_key_name="shooter_status" route_id="0" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+									<ForceSuccess>
+										<Sequence name="Sequence turn on sticks">
+											<Action ID="CheckCustomBBBool" name="night mode" param_name="night_mode" param_value="true"/>
+											<Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="1,1,0.3,0.3" attachment_names="LeftStick,RightStick,LeftStick,RightStick" member_name="director"/>
+											<Action ID="ShowAttachments" attachment_names="LeftStick,RightStick,LeftLight,RightLight" delay="0" member_name="director" visible="true,true,true,true"/>
+										</Sequence>
+									</ForceSuccess>                                    
+									<Fallback name="Check Wings Unfold">
+										<Action ID="CheckCrewDataBool" condition="equal" name="early_wing_unfold == false?" output_bb_key="" param_name="early_wing_unfold" param_value="false"/>						
+                                        <Action ID="CheckCrewDataBool" condition="equal" name="wing_unfold_condition == true?" output_bb_key="" param_name="wing_unfold_condition" param_value="true"/>
+										<ForceFailure>
+											<Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_CAN_TAXI" attribute_value="false" name="GC_REQUEST_CREW_CAN_TAXI = false"/>
+										</ForceFailure>
+										<ForceFailure>
+											<Action ID="PlayAnimation" animation_name="sign_unfoldwings_short" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" name="sign_unfoldwings_short" random_animation="false" start_time_shift="0" wait_mode="wait_cycle"/>
+										</ForceFailure>
+										<ForceFailure>
+											<Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_CAN_TAXI" attribute_value="true" name="GC_REQUEST_CREW_CAN_TAXI = true"/>
+										</ForceFailure>
+										<Action ID="SetGCRequest" attribute_name="GC_REQUEST_WINGS_UNFOLD" attribute_value="true" name="GC_REQUEST_WINGS_UNFOLD = true"/>
+                                    </Fallback>
+                                    <SetBlackboard name="animation_state = empty" output_key="animation_state" value="empty"/>
+                                    <Fallback name="Taxi">
+                                        <Action ID="CheckCrewDataString" condition="equal" name="stop" output_bb_key="" param_name="taxi_state" param_value="stop"/>
+                                        <ForceFailure>
+                                            <Fallback name="Taxi">
+                                                <Sequence name="Left">
+                                                    <Action ID="CheckCrewDataString" condition="equal" output_bb_key="animation_state" param_name="taxi_state" param_value="left"/>
+                                                    <Action ID="PlayAnimation" animation_name="Sign_TaxiFwd_L" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" random_animation="false" start_time_shift="-0.88333" wait_mode="no_wait"/>                                                    
+                                                </Sequence>
+                                                <Sequence name="right">
+                                                    <Action ID="CheckCrewDataString" condition="equal" output_bb_key="animation_state" param_name="taxi_state" param_value="right"/>
+                                                    <Action ID="PlayAnimation" animation_name="Sign_TaxiFwd_R" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" random_animation="false" start_time_shift="-0.88333" wait_mode="no_wait"/>
+                                                </Sequence>
+                                                <Sequence name="forward">
+                                                    <Action ID="CheckCrewDataString" condition="equal" output_bb_key="animation_state" param_name="taxi_state" param_value="forward"/>
+                                                    <Action ID="PlayAnimation" animation_name="Sign_TaxiFwd" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" random_animation="false" start_time_shift="-0.88333" wait_mode="no_wait"/>
+                                                </Sequence>
+                                            </Fallback>
+                                        </ForceFailure>
+                                    </Fallback>
+                                    <Action ID="PlayAnimation" animation_name="Sign_SetBrakes" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" name="Sign_SetBrakes" random_animation="false" start_time_shift="-1.3333" wait_mode="wait_cycle"/>
+                                    <Parallel name="Move greens and whites" threshold="3">
+                                        <Action ID="Move" member_name="white1" name="Move white1 1" output_key_name="white1_status" route_id="0" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                        <Action ID="Move" member_name="white2" name="Move white2 1" output_key_name="white2_status" route_id="0" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                        <Action ID="Move" member_name="green_nw" name="Move green_nw" output_key_name="green_nw_status" route_id="0" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                    </Parallel>
+                                    <ForceSuccess>
+                                        <Sequence>
+                                            <Action ID="CheckCrewDataInt" condition="equal" name="catapult_id == 4?" output_bb_key="" param_name="catapult_id" param_value="4"/>
+                                            <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="true" catapult="master" name="master GC_REQUEST_CREW_BUSY == true?"/>
+                                            <Action ID="MessageNode" duration="15" message="Cat 3 blocking start. Please Wait" name="Cat 3 blocking start. Please Wait"/>
+                                        </Sequence>
+                                    </ForceSuccess>
+                                    <!-- <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="false" catapult="master" name="GC_REQUEST_CREW_BUSY check master"/> -->
+									<Decorator ID="BlackboardCheckBool" name="large_wingspan == true?" return_on_mismatch="SUCCESS" value_A="{large_wingspan}" value_B="true">
+										<SequenceStar name="check neigbour cat">
+											<Action ID="SetGCRequest" attribute_name="GC_REQUEST_LARGE_WINGSPAN" attribute_value="true" name="GC_REQUEST_LARGE_WINGSPAN = true"/>
+											<!-- <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="false" catapult="neighbour" name=" neighbour  cat free?"/> -->
+										</SequenceStar>
+									</Decorator>
+									<Action ID="CheckGCRequest" attribute_name="GC_REQUEST_LARGE_WINGSPAN" attribute_value="false" catapult="neighbour" name="GC_REQUEST_LARGE_WINGSPAN == false on master?"/>
+                                    <Fallback name="Check Wings Unfold again">
+                                        <Action ID="CheckCrewDataBool" condition="equal" name="wing_unfold_condition == true?" output_bb_key="" param_name="wing_unfold_condition" param_value="true"/>
+										<ForceFailure>
+											<Action ID="PlayAnimation" animation_name="Sign_UnfoldWings" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" name="Sign_UnfoldWings" random_animation="false" start_time_shift="0" wait_mode="wait_cycle"/>
+										</ForceFailure>
+										<Action ID="SetGCRequest" attribute_name="GC_REQUEST_WINGS_UNFOLD" attribute_value="true" name="GC_REQUEST_WINGS_UNFOLD = true"/>
+                                    </Fallback>
+                                    <SequenceStar name="Wait wing and white">
+										<Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_CAN_TAXI" attribute_value="true" name="GC_REQUEST_CREW_CAN_TAXI = true"/>
+                                        <Action ID="CheckCrewDataBool" condition="equal" name="wing_unfold_condition == true?" output_bb_key="" param_name="wing_unfold_condition" param_value="true"/>
+                                        <Parallel name="Move whites 2nd time" threshold="4">
+                                            <BlackboardCheckString return_on_mismatch="FAILURE" value_A="{white1_status}" value_B="ready">
+                                                <AlwaysSuccess/>
+                                            </BlackboardCheckString>
+                                            <BlackboardCheckString return_on_mismatch="FAILURE" value_A="{white2_status}" value_B="ready">
+                                                <AlwaysSuccess/>
+                                            </BlackboardCheckString>
+                                            <Action ID="Move" member_name="white1" name="Move white1 2" output_key_name="white1_status" route_id="1" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                            <Action ID="Move" member_name="white2" name="Move white2 2" output_key_name="white2_status" route_id="1" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                        </Parallel>
+                                    </SequenceStar>
+                                    <SequenceStar name="Move to hbb setup point">
+                                        <Action ID="CheckCrewDataFloat" condition="less" name="aircraft_velocity_magnitude &lt; 0.01?" output_bb_key="" param_name="aircraft_velocity_magnitude" param_value="0.1"/>
+                                        <Action ID="Move" member_name="green_hbb" name="Move green_hbb" output_key_name="green_hbb_status" route_id="0" tail_point_mode="hbb_mount_point" wait_mode="NO_WAIT"/>
+                                    </SequenceStar>
+                                    <Fallback name="Lower launchbar">
+                                        <Inverter>
+                                            <Condition ID="CheckDrawArgument" argument_id="85" argument_value="0.25" condition="less" name="LaunchBar"/>
+                                        </Inverter>
+                                        <Action ID="PlayAnimation" animation_name="Sign_LowerLaunchBar" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" name="Sign_LowerLaunchBar" random_animation="false" start_time_shift="0" wait_mode="wait_cycle"/>
+                                    </Fallback>
+                                    <Action ID="SetGCRequest" attribute_name="GC_REQUEST_LOWER_LAUNCHBAR" attribute_value="true"/>
+                                    <Condition ID="CheckDrawArgument" argument_id="85" argument_value="0.6" condition="greater" name="wait launchbar"/>
+                                    <Action ID="FinishAnimation" member_name="director"/>
+                                    <Action ID="Move" member_name="director" name="Move director" output_key_name="director_status" route_id="0" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                    <BlackboardCheckString name="Wait for green_hbb" return_on_mismatch="FAILURE" value_A="{green_hbb_status}" value_B="ready">
+                                        <AlwaysSuccess/>
+                                    </BlackboardCheckString>
+                                    <SequenceStar name="HBB phase">
+                                        <Action ID="OverrideAnimation" enabled="false" member_name="green_hbb" name="hbb off" override_animation_name=""/>
+                                        <Action ID="PlayAnimation" animation_name="Holdbar_SetUp" continue_previous_animation="false" delay="0" delay_spread="0" member_name="green_hbb" name="Holdbar_SetUp" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                                        <Action ID="ShowAttachment" attachment_name="HBB" delay="2.5" member_name="green_hbb" visible="false"/>
+										<Action ID="SetAttachmentArgument" argument_id="15" argument_value="-1" attachment_name="HBB" member_name="green_hbb"/>
+                                        <Action ID="ShowAircraftHBB" flag="true"/>
+                                        <Action ID="SetGCRequest" attribute_name="GC_REQUEST_HOLDBACKBAR_ATTACHED" attribute_value="true" name="GC_REQUEST_HOLDBACKBAR_ATTACHED = true"/>
+                                        <Action ID="FinishAnimation" member_name="green_hbb"/>
+                                        <Action ID="Move" member_name="green_hbb" name="Move green_hbb 1" output_key_name="green_hbb_status" route_id="1" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                    </SequenceStar>
+                                    <BlackboardCheckString name="director_status == ready" return_on_mismatch="FAILURE" value_A="{director_status}" value_B="ready">
+                                        <Action ID="PlayAnimation" animation_name="Sign_TaxiFwd" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" name="Sign_TaxiFwd" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                                    </BlackboardCheckString>
+                                    <SequenceStar name="NW operation 1">
+                                        <ForceSuccess>
+                                            <Sequence name="Sequence turn on sticks">
+												<Action ID="CheckCustomBBBool" name="night mode" param_name="night_mode" param_value="true"/>                                                
+												<Action ID="SetAttachmentArguments" argument_ids="0,1" argument_values="1,0.8" attachment_names="green_nw_stick_attachment,green_nw_stick_attachment" member_name="green_nw"/>
+                                                <Action ID="ShowAttachment" attachment_name="green_nw_light_attachment" delay="0" member_name="green_nw" visible="true"/>
+                                            </Sequence>
+                                        </ForceSuccess>
+                                        <Action ID="PlayAnimation" animation_name="NoseGearOperation1" continue_previous_animation="false" delay="0" delay_spread="0" member_name="green_nw" name="NoseGearOperation1" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                                        <Action ID="Pause" delay="1" random_spread="0"/>
+                                        <Action ID="SetGCRequest" attribute_name="GC_REQUEST_MOVE_FORWARD_WITH_LOW_LAUNCHBAR" attribute_value="true" name="GC_REQUEST_MOVE_FORWARD_WITH_LOW_LAUNCHBAR = true"/>
+                                    </SequenceStar>
+                                    <Action ID="CheckCrewDataFloat" condition="greater" name="shuttle_tension_condition == hbb_state?" output_bb_key="" param_name="hbb_state" param_value="{shuttle_tension_condition}"/>
+                                    <Action ID="PlayAnimation" animation_name="Sign_SetBrakes" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" name="Sign_SetBrakes" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                                    <SequenceStar name="NW operation 2">
+                                        <Action ID="FinishAnimation" member_name="green_nw"/>
+                                        <Action ID="PlayAnimation" animation_name="NoseGearOperation2" continue_previous_animation="false" delay="0" delay_spread="0" member_name="green_nw" name="NoseGearOperation2" random_animation="false" start_time_shift="0" wait_mode="wait_cycle"/>
+                                        <Action ID="SetGCRequest" attribute_name="GC_REQUEST_SHUTTLE_TENSION" attribute_value="true" name="GC_REQUEST_SHUTTLE_TENSION = true"/>
+                                        <Action ID="CheckCrewDataBool" condition="equal" name="lb_flag == true?" output_bb_key="" param_name="lb_flag" param_value="true"/>
+                                        <Action ID="FinishAnimation" member_name="green_nw"/>
+                                        <ForceSuccess>
+                                            <Sequence name="Sequence turn off sticks">
+												<Action ID="CheckCustomBBBool" name="night mode" param_name="night_mode" param_value="true"/>                                               
+												<Action ID="SetAttachmentArgument" argument_id="0" argument_value="0" attachment_name="green_nw_stick_attachment" member_name="green_nw"/>
+                                                <Action ID="ShowAttachment" attachment_name="green_nw_light_attachment" delay="0" member_name="green_nw" visible="false"/>
+                                            </Sequence>
+                                        </ForceSuccess>
+                                    </SequenceStar>
+                                    <Action ID="Move" member_name="green_nw" name="Move green_nw back" output_key_name="ready" route_id="1" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                    <Fallback name="raise Lb if needed">
+                                        <Inverter>
+                                            <Action ID="CheckCrewDataBool" condition="equal" name="raise_launch_bar_needed == true?" output_bb_key="" param_name="raise_launch_bar_needed" param_value="true"/>
+                                        </Inverter>
+                                        <Action ID="PlayAnimation" animation_name="Sign_RaiseLaunchBar" continue_previous_animation="false" delay="0" delay_spread="0" member_name="director" name="Sign_RaiseLaunchBar" random_animation="false" start_time_shift="0" wait_mode="wait_cycle"/>
+                                    </Fallback>
+                                    <ForceSuccess>
+                                        <Sequence name="Sequence turn on sticks">
+											<Action ID="CheckCustomBBBool" name="night mode" param_name="night_mode" param_value="true"/>                                           
+											<Action ID="SetAttachmentArguments" argument_ids="0,0" argument_values="0,0" attachment_names="LeftStick,RightStick" member_name="director"/>
+                                            <Action ID="ShowAttachments" attachment_names="LeftStick,RightStick,LeftLight,RightLight" delay="0" member_name="director" visible="true,true,false,false"/>
+                                        </Sequence>
+                                    </ForceSuccess>
+                                    <SetBlackboard name="first_phase_complete = 1" output_key="first_phase_complete" value="1"/>
+                                </SequenceStar>
+                            </Sequence>
+                        </Decorator>
+                        <SequenceStar name="Runway Start">
+                            <BlackboardCheckInt name="first_phase_complete == 1?" return_on_mismatch="SUCCESS" value_A="{first_phase_complete}" value_B="0">
+                                <SequenceStar>
+                                    <SubTree ID="TeleportCrew"/>
+                                    <Action ID="OverrideAnimation" enabled="false" member_name="green_hbb" override_animation_name=""/>
+                                    <Action ID="ShowAttachment" attachment_name="HBB" delay="0" member_name="green_hbb" visible="false"/>
+									<Action ID="SetAttachmentArgument" argument_id="15" argument_value="-1" attachment_name="HBB" member_name="green_hbb"/>
+                                </SequenceStar>
+                            </BlackboardCheckInt>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="true" name="GC_REQUEST_CREW_BUSY = 1"/>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_SAFE" attribute_value="false" name="GC_REQUEST_CREW_SAFE = false"/>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE" attribute_value="false" name="GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE = false`"/>
+                            <ForceSuccess>
+                                <Sequence name="Check Cat 3">
+                                    <Action ID="CheckCrewDataInt" condition="equal" name="catapult_id == 4?" output_bb_key="" param_name="catapult_id" param_value="4"/>
+                                    <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="true" catapult="master" name="master GC_REQUEST_CREW_BUSY == true?"/>
+                                    <Action ID="MessageNode" duration="15" message="Cat 3 blocking start, please wait" name="Cat 3 blocking start, please wait"/>
+                                </Sequence>
+                            </ForceSuccess>
+                            <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="false" catapult="master" name="GC_REQUEST_CREW_BUSY == false on master"/>
+                            <Action ID="BlockMasterCatapult" name="GC_ORDER_OPERATION_ALLOWED = false" value="false"/>
+                            <Action ID="PlayAnimation" animation_name="white1_kneel_animation" continue_previous_animation="false" delay="0" delay_spread="1" member_name="white1" name="white1 CrouchM_Loop" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                            <Action ID="PlayAnimation" animation_name="white2_kneel_animation" continue_previous_animation="false" delay="0" delay_spread="1" member_name="white2" name="white2 CrouchU_Loop" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                            <Action ID="CheckCrewDataInt" condition="gequal" name="client_status == 13" output_bb_key="" param_name="client_status" param_value="13"/>
+                            <ForceSuccess>
+                                <Sequence name="Sequence turn on sticks">
+									<Action ID="CheckCustomBBBool" name="night mode" param_name="night_mode" param_value="true"/>                                   
+									<Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="1,1,0.6,0.1" attachment_names="shooter_left_stick_attachment,shooter_right_stick_attachment,shooter_left_stick_attachment,shooter_right_stick_attachment" member_name="shooter"/>
+                                    <Action ID="ShowAttachments" attachment_names="shooter_left_stick_attachment,shooter_right_stick_attachment,shooter_left_light_attachment,shooter_right_light_attachment" delay="0" member_name="shooter" visible="true,true,true,true"/>
+                                </Sequence>
+                            </ForceSuccess>
+                            <Action ID="PlayAnimation" animation_name="Sign_Launch1" continue_previous_animation="false" delay="0" delay_spread="0" member_name="shooter" name="shooter Sign_Launch1" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                            <Action ID="Pause" delay="4" name="Pause 4 secs" random_spread="0"/>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_AFTERBURN" attribute_value="true" name="GC_REQUEST_AFTERBURN = true"/>
+                            <Condition ID="WaitAfterburner"/>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CHECK_AIRCRAFT_CONTROLS" attribute_value="true" name="GC_REQUEST_CHECK_AIRCRAFT_CONTROLS = true"/>
+                            <Action ID="Pause" delay="2" name="Pause 2 sec" random_spread="0"/>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CHECK_AIRCRAFT_CONTROLS" attribute_value="false" name="GC_REQUEST_CHECK_AIRCRAFT_CONTROLS  = false"/>
+                            <Action ID="CheckCrewDataBool" condition="equal" name="salute_flag == true?" output_bb_key="" param_name="salute_flag" param_value="true"/>
+                            <ForceSuccess>
+                                <Sequence name="Night Mode Sequence">
+									<Action ID="CheckCustomBBBool" name="night mode" param_name="night_mode" param_value="true"/>                                    
+									<Action ID="ShowAttachments" attachment_names="LeftLight,LeftStick,RightLight,RightStick" delay="0" member_name="director" visible="true,true,false,false"/>
+                                    <Action ID="ShowAttachments" attachment_names="shooter_left_stick_attachment,shooter_right_stick_attachment,shooter_left_light_attachment,shooter_right_light_attachment" delay="0" member_name="shooter" visible="true,true,true,true"/>
+                                    <Action ID="ShowAttachments" attachment_names="LeftLight,LeftStick" delay="0" member_name="white1" visible="true,true"/>
+                                    <Action ID="ShowAttachments" attachment_names="RightLight,RightStick" delay="0" member_name="white2" visible="true,true"/>
+                                    <Action ID="ShowAttachments" attachment_names="green_nw_light_attachment,green_nw_stick_attachment" delay="0" member_name="green_nw" visible="true,true"/>
+                                    <Action ID="ShowAttachments" attachment_names="green_hbb_stick,green_hbb_light_stick" delay="0" member_name="green_hbb" visible="true,true"/>
+									<Action ID="SetAttachmentArgument" argument_id="15" argument_value="0" attachment_name="green_hbb_stick" member_name="green_hbb"/>
+                                    <Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="1,1,0.6,0.1" attachment_names="shooter_left_stick_attachment,shooter_right_stick_attachment,shooter_left_stick_attachment,shooter_right_stick_attachment" member_name="shooter"/>
+                                    <Action ID="SetAttachmentArguments" argument_ids="0,1" argument_values="1,0.3" attachment_names="LeftStick,LeftStick" member_name="director"/>
+                                    <Action ID="SetAttachmentArguments" argument_ids="0,1" argument_values="1,0.8" attachment_names="LeftStick,LeftStick" member_name="white1"/>
+                                    <Action ID="SetAttachmentArguments" argument_ids="0,1" argument_values="1,0.8" attachment_names="RightStick,RightStick" member_name="white2"/>
+                                    <Action ID="SetAttachmentArguments" argument_ids="0,1" argument_values="1,0.8" attachment_names="green_nw_stick_attachment,green_nw_stick_attachment" member_name="green_nw"/>
+                                    <Action ID="SetAttachmentArguments" argument_ids="0,1" argument_values="1,0.8" attachment_names="green_hbb_stick,green_hbb_stick" member_name="green_hbb"/>
+									<Action ID="OverrideAnimation" enabled="true" member_name="green_hbb" override_animation_name="green_hbb_night_override_animation"/>
+                                </Sequence>
+                            </ForceSuccess>
+                            <Parallel name="signal ok" threshold="5">
+                                <Action ID="PlayAnimation" animation_name="green_nw_ok_animation" continue_previous_animation="false" delay="0" delay_spread="1" member_name="green_nw" name="green_nw CrouchU_SignOk" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                                <Action ID="PlayAnimation" animation_name="CrouchU_SignOk" continue_previous_animation="false" delay="0" delay_spread="2" member_name="green_hbb" name="green_hbb CrouchU_SignOk" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                                <Action ID="PlayAnimation" animation_name="white1_ok_animation" continue_previous_animation="false" delay="0" delay_spread="1" member_name="white1" name="white1 CrouchM_SignOk2" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                                <Action ID="PlayAnimation" animation_name="white2_ok_animation" continue_previous_animation="false" delay="0" delay_spread="2" member_name="white2" name="white2 CrouchU_SignOk2" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                                <Action ID="PlayAnimation" animation_name="CrouchU_SignOk" continue_previous_animation="false" delay="0" delay_spread="1" member_name="director" name="director CrouchU_SignOk" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                            </Parallel>
+                            <Action ID="PlayAnimation" animation_name="Sign_Launch2" continue_previous_animation="true" delay="0" delay_spread="0" member_name="shooter" name="shooter Sign_Launch2" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                            <Action ID="Pause" delay="9" name="Pause 9 sec" random_spread="0"/>
+                            <ForceSuccess>
+                                <Sequence name="Check Cat 3">
+                                    <Action ID="CheckCrewDataInt" condition="equal" name="catapult_id == 4?" output_bb_key="" param_name="catapult_id" param_value="4"/>
+                                    <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="true" catapult="master" name="master GC_REQUEST_CREW_BUSY == false?"/>
+                                    <Action ID="MessageNode" duration="15" message="Cat 3 blocking start, please wait" name="Cat 3 blocking start, please wait"/>
+                                </Sequence>
+                            </ForceSuccess>
+                            <Action ID="CheckGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="false" catapult="master" name="GC_REQUEST_CREW_BUSY ==  false on masster"/>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_TAKEOFF" attribute_value="true" name="GC_REQUEST_TAKEOFF = true"/>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_LARGE_WINGSPAN" attribute_value="false" name="GC_REQUEST_LARGE_WINGSPAN = false"/>
+                            <Condition ID="CheckNoseGearDistance" condition="greater" distance="{takeoff_distance}"/>
+                            <Parallel threshold="6">
+                                <Action ID="PlayAnimation" animation_name="Idle" continue_previous_animation="false" delay="0" delay_spread="1" member_name="shooter" name="shooter Idle" random_animation="false" start_time_shift="0" wait_mode="wait_start"/>
+                                <Action ID="PlayAnimation" animation_name="Idle" continue_previous_animation="false" delay="1" delay_spread="1" member_name="director" name="director Idle" random_animation="false" start_time_shift="0" wait_mode="wait_start"/>
+                                <Action ID="PlayAnimation" animation_name="Idle" continue_previous_animation="false" delay="1" delay_spread="1" member_name="green_nw" name="green_nw Idle" random_animation="false" start_time_shift="0" wait_mode="wait_start"/>
+                                <Action ID="PlayAnimation" animation_name="Idle" continue_previous_animation="false" delay="1" delay_spread="1" member_name="green_hbb" name="green_hbb Idle" random_animation="false" start_time_shift="0" wait_mode="wait_start"/>
+								<SequenceStar name="finishing animation white1">
+									<!-- <Action ID="FinishAnimation" member_name="white1"/> -->
+									<Action ID="PlayAnimation" animation_name="Idle" continue_previous_animation="false" delay="1" delay_spread="1" member_name="white1" name="white1 Idle" random_animation="false" start_time_shift="0" wait_mode="wait_start"/>
+								</SequenceStar>
+								<SequenceStar name="finishing animation white2">
+									<Action ID="FinishAnimation" member_name="white2"/>
+									<Action ID="PlayAnimation" animation_name="Idle" continue_previous_animation="false" delay="1" delay_spread="1" member_name="white2" name="white2 Idle" random_animation="false" start_time_shift="0" wait_mode="wait_start"/>
+								</SequenceStar>
+                            </Parallel>
+                            <ForceSuccess>
+                                <Sequence name="if night turn off lights">
+									<Action ID="CheckCustomBBBool" name="night mode" param_name="night_mode" param_value="true"/>   									
+                                    <Action ID="ShowAttachments" attachment_names="LeftLight,LeftStick,RightLight,RightStick" delay="0" member_name="director" visible="false,true,false,true"/>
+                                    <Action ID="ShowAttachments" attachment_names="shooter_left_stick_attachment,shooter_right_stick_attachment,shooter_left_light_attachment,shooter_right_light_attachment" delay="0" member_name="shooter" visible="true,true,false,false"/>
+                                    <Action ID="ShowAttachments" attachment_names="LeftLight,LeftStick" delay="0" member_name="white1" visible="false,true"/>
+                                    <Action ID="ShowAttachments" attachment_names="RightLight,RightStick" delay="0" member_name="white2" visible="false,true"/>
+                                    <Action ID="ShowAttachments" attachment_names="green_nw_light_attachment,green_nw_stick_attachment" delay="0" member_name="green_nw" visible="false,true"/>
+                                    <Action ID="ShowAttachments" attachment_names="green_hbb_stick,green_hbb_light_stick" delay="0" member_name="green_hbb" visible="false,false"/>
+									<Action ID="SetAttachmentArgument" argument_id="15" argument_value="-1" attachment_name="green_hbb_stick" member_name="green_hbb"/>
+                                    <Action ID="SetAttachmentArguments" argument_ids="0,0" argument_values="0,0" attachment_names="LeftStick,RightStick" member_name="director"/>
+                                    <Action ID="SetAttachmentArguments" argument_ids="0,0" argument_values="0,0" attachment_names="LeftStick,RightStick" member_name="shooter"/>
+                                    <Action ID="SetAttachmentArgument" argument_id="0" argument_value="0" attachment_name="LeftStick" member_name="white1"/>
+                                    <Action ID="SetAttachmentArgument" argument_id="0" argument_value="0" attachment_name="RightStick" member_name="white2"/>
+                                    <Action ID="SetAttachmentArgument" argument_id="0" argument_value="0" attachment_name="green_nw_stick_attachment" member_name="green_nw"/>
+                                    <Action ID="SetAttachmentArgument" argument_id="0" argument_value="0" attachment_name="green_hbb_stick" member_name="green_hbb"/>
+									<Action ID="OverrideAnimation" enabled="false" member_name="green_hbb" override_animation_name=""/>
+                                </Sequence>
+                            </ForceSuccess>
+							<ForceSuccess>
+								<SubTree ID="SetNightModeAttachments"/>
+							</ForceSuccess>
+                            <Action ID="BlockMasterCatapult" name="GC_ORDER_OPERATION_ALLOWED = true" value="true"/>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_CREW_BUSY" attribute_value="false" name="GC_REQUEST_CREW_BUSY = false"/>
+                            <SequenceStar name="Move to initial state">
+                                <Action ID="Move" member_name="white1" name="white1 move to initial state route 2" output_key_name="white1_status" route_id="2" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                <Action ID="Move" member_name="white2" name="white2  move to initial state route 2" output_key_name="white2_status" route_id="2" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                <Action ID="Move" member_name="director" name="director  move to initial state route 1" output_key_name="director_status" route_id="1" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                <Action ID="Move" member_name="shooter" name="shooter  move to initial state route 1" output_key_name="shooter_status" route_id="1" tail_point_mode="normal" wait_mode="NO_WAIT"/>
+                                <Action ID="Move" member_name="green_hbb" name="green_hbb Move2" output_key_name="green_hbb_status" route_id="2" tail_point_mode="normal" wait_mode="WAIT"/>
+                            </SequenceStar>
+                            <Action ID="PlayAnimation" animation_name="Holdbar_PickUp" continue_previous_animation="false" delay="0" delay_spread="0" member_name="green_hbb" name="Holdbar_PickUp" random_animation="false" start_time_shift="0" wait_mode="no_wait"/>
+                            <Action ID="ShowAttachment" attachment_name="HBB" delay="0.833" member_name="green_hbb" name="ShowAttachment HBB" visible="true"/>
+							<Action ID="SetAttachmentArgument" argument_id="15" argument_value="0" attachment_name="HBB" member_name="green_hbb"/>
+                            <Action ID="ShowShipHBB" flag="false"/>
+                            <Action ID="SetGCRequest" attribute_name="GC_REQUEST_HOLDBACKBAR_ATTACHED" attribute_value="false" name="GC_REQUEST_HOLDBACKBAR_ATTACHED =false"/>
+                            <Action ID="FinishAnimation" member_name="green_hbb"/>
+                            <Action ID="OverrideAnimation" enabled="true" member_name="green_hbb" name="OverrideAnimation holdback_bar_arm" override_animation_name="holdback_bar_arm"/>
+                            <Parallel threshold="2">
+                                <Action ID="Move" member_name="green_hbb" name="green_hbb Move 3" output_key_name="green_hbb_status" route_id="3" tail_point_mode="normal" wait_mode="WAIT"/>
+                                <Action ID="Move" member_name="green_nw" output_key_name="green_nw_status" route_id="2" tail_point_mode="normal" wait_mode="WAIT"/>
+                            </Parallel>
+                            <SubTree ID="SetCrewIdle"/>
+                            <Action ID="ResetLA"/>
+                        </SequenceStar>
+                    </SequenceStar>
+                </Decorator>
+            </Sequence>
+        </SequenceStar>
+    </BehaviorTree>
+    <!-- ////////// -->
+    <BehaviorTree ID="SetCrewIdle">
+        <SequenceStar name="Idle ">
+            <Action ID="SetIdle" member_name="shooter"/>
+            <Action ID="SetIdle" member_name="director"/>
+            <Action ID="SetIdle" member_name="white1"/>
+            <Action ID="SetIdle" member_name="white2"/>
+            <Action ID="SetIdle" member_name="green_nw"/>
+            <Action ID="SetIdle" member_name="green_hbb"/>
+        </SequenceStar>
+    </BehaviorTree>
+    <!-- ////////// -->
+    <BehaviorTree ID="TeleportCrew">
+        <Sequence name="Teleport Crew">
+            <Action ID="TeleportMember" member_name="director"/>
+            <Action ID="TeleportMember" member_name="shooter"/>
+            <Action ID="TeleportMember" member_name="white1"/>
+            <Action ID="TeleportMember" member_name="white2"/>
+            <Action ID="TeleportMember" member_name="green_nw"/>
+            <Action ID="TeleportMember" member_name="green_hbb"/>
+        </Sequence>
+    </BehaviorTree>
+    <BehaviorTree ID="SetNightModeAttachments">
+		<Sequence name="Night Mode Sequence">
+			<ForceSuccess>
+				<Sequence name="Night">
+					<Action ID="CheckCrewDataBool" condition="equal" name="check night mode" output_bb_key="night_mode" param_name="night_mode" param_value="true"/>
+					<Action ID="ShowAttachments" member_name="shooter" 	attachment_names="shooter_left_stick_attachment,shooter_right_stick_attachment,shooter_left_light_attachment,shooter_right_light_attachment" visible="true,true,false,false" delay="0"/>
+					<Action ID="ShowAttachments" member_name="director" attachment_names="LeftStick,RightStick,LeftLight,RightLight" 			visible="true,true,false,false" delay="0"/>
+					<Action ID="ShowAttachments" member_name="white1" 	attachment_names="LeftStick,LeftLight" 									visible="true,false" delay="0"/>
+					<Action ID="ShowAttachments" member_name="white2" 	attachment_names="RightStick,RightLight" 								visible="true,false" delay="0"/>
+					<Action ID="ShowAttachments" member_name="green_nw" attachment_names="green_nw_stick_attachment,green_nw_light_attachment" 	visible="true,false" delay="0"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="0,0,0.6,0.1" attachment_names="shooter_left_stick_attachment,shooter_right_stick_attachment,shooter_left_stick_attachment,shooter_right_stick_attachment" member_name="shooter" name="stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="0,0,0.3,0.3" attachment_names="LeftStick,RightStick,LeftStick,RightStick" member_name="director" 	name="yellow stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="0,-1,0.8,0.8" attachment_names="LeftStick,RightStick,LeftStick,RightStick" member_name="white1" 		name="blue stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="-1,0,0.8,0.8" attachment_names="LeftStick,RightStick,LeftStick,RightStick" member_name="white2" 		name="blue stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="-1,-1,0.8,0.8" attachment_names="LeftStick,RightStick,LeftStick,RightStick" member_name="green_nw" 	name="blue stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="-1,-1,0.8,0.8" attachment_names="LeftStick,RightStick,LeftStick,RightStick" member_name="green_hbb" 	name="blue stick color"/>
+					<Action ID="SetAttachmentArgument" 	argument_id="0" argument_value="0" attachment_name="green_nw_stick_attachment" member_name="green_nw"/>
+					<Action ID="OverrideAnimation" enabled="true" member_name="shooter" override_animation_name="Night_Stick_ArmPose"/>
+					<Action ID="OverrideAnimation" enabled="true" member_name="director" override_animation_name="Night_Stick_ArmPose"/>
+					<Action ID="OverrideAnimation" enabled="true" member_name="white1" override_animation_name="Night_Stick_ArmPose_L"/>
+					<Action ID="OverrideAnimation" enabled="true" member_name="white2" override_animation_name="Night_Stick_ArmPose_R"/>
+					<Action ID="OverrideAnimation" enabled="true" member_name="green_nw" override_animation_name="green_nw_night_override_animation"/>
+				</Sequence>
+			</ForceSuccess>
+			<ForceSuccess>			
+				<Sequence name="Not Night">
+					<Action ID="CheckCrewDataBool" condition="not_equal" name="check night mode" output_bb_key="" param_name="night_mode" param_value="true"/>
+					<Action ID="ShowAttachments" attachment_names="LeftStick,RightStick,LeftLight,RightLight" delay="0" member_name="director" 	visible="false,false,false,false"/>
+					<Action ID="ShowAttachments" attachment_names="LeftStick,RightStick,LeftLight,RightLight" delay="0" member_name="shooter" 	visible="false,false,false,false"/>
+					<Action ID="ShowAttachments" attachment_names="LeftStick,RightStick,LeftLight,RightLight" delay="0" member_name="white1" 	visible="false,false,false,false"/>
+					<Action ID="ShowAttachments" attachment_names="LeftStick,RightStick,LeftLight,RightLight" delay="0" member_name="white2" 	visible="false,false,false,false"/>
+					<Action ID="ShowAttachments" attachment_names="LeftStick,RightStick,LeftLight,RightLight" delay="0" member_name="green_nw" 	visible="false,false,false,false"/>
+					<Action ID="ShowAttachments" attachment_names="LeftStick,RightStick,LeftLight,RightLight" delay="0" member_name="green_hbb" visible="false,false,false,false"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0" argument_values="-1,-1" attachment_names="LeftStick,RightStick" member_name="green_nw" 	name="blue stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0" argument_values="-1,-1" attachment_names="green_hbb_stick,green_hbb_light_stick" member_name="green_hbb" 	name="blue stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0" argument_values="-1,-1" attachment_names="LeftStick,RightStick" member_name="white1" 		name="blue stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0" argument_values="-1,-1" attachment_names="LeftStick,RightStick" member_name="white2" 		name="blue stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0" argument_values="-1,-1" attachment_names="LeftStick,RightStick" member_name="director" 	name="yellow stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0" argument_values="-1,-1" attachment_names="LeftStick,RightStick" member_name="shooter" 		name="stick color"/>
+					<Action ID="SetAttachmentArguments" argument_ids="0,0,1,1" argument_values="-1,-1,0.8,0.8" attachment_names="LeftStick,RightStick,LeftStick,RightStick" member_name="green_hbb" 	name="blue stick color"/>
+					<Action ID="OverrideAnimation" enabled="false" member_name="shooter" 	override_animation_name=""/>
+					<Action ID="OverrideAnimation" enabled="false" member_name="director" 	override_animation_name=""/>
+					<Action ID="OverrideAnimation" enabled="false" member_name="white1" 	override_animation_name=""/>
+					<Action ID="OverrideAnimation" enabled="false" member_name="white2" 	override_animation_name=""/>
+					<Action ID="OverrideAnimation" enabled="false" member_name="green_nw" 	override_animation_name=""/>
+				</Sequence>
+			</ForceSuccess>
+		</Sequence>
+    </BehaviorTree>
+    <!-- ////////// -->
+	
+    <TreeNodesModel>
+        <Decorator ID="BlackboardCheckBool">
+            <input_port default="FAILURE" name="return_on_mismatch"/>
+            <input_port name="value_A"/>
+            <input_port name="value_B"/>
+        </Decorator>
+        <Action ID="BlockMasterCatapult">
+            <input_port name="value"/>
+        </Action>
+        <Action ID="CheckCrewDataBool">
+            <input_port default="equal" name="condition"/>
+            <output_port name="output_bb_key"/>
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="CheckCrewDataFloat">
+            <input_port default="equal" name="condition"/>
+            <output_port name="output_bb_key"/>
+            <input_port name="param_name"/>
+            <input_port default="0" name="param_value"/>
+        </Action>
+        <Action ID="CheckCrewDataInt">
+            <input_port name="condition"/>
+            <output_port name="output_bb_key"/>
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="CheckCrewDataString">
+            <input_port name="condition"/>
+            <output_port name="output_bb_key"/>
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="CheckCustomBBFloat">
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="CheckCustomBBInt">
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="CheckCustomBBBool">
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="CheckCustomBBString">
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="SetCustomBBFloat">
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="SetCustomBBInt">
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="SetCustomBBBool">
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Action ID="SetCustomBBString">
+            <input_port name="param_name"/>
+            <input_port name="param_value"/>
+        </Action>
+        <Condition ID="CheckDrawArgument">
+            <input_port name="argument_id"/>
+            <input_port name="argument_value"/>
+            <input_port name="condition"/>
+        </Condition>
+        <Condition ID="CheckGCOrder">
+            <input_port name="attribute_name"/>
+            <input_port name="attribute_value"/>
+            <input_port default="self" name="catapult"/>
+        </Condition>
+        <Action ID="CheckGCRequest">
+            <input_port name="attribute_name"/>
+            <input_port name="attribute_value"/>
+            <input_port default="self" name="catapult"/>
+        </Action>
+        <Condition ID="CheckLA">
+            <output_port default="la_assigned" name="output_key_name"/>
+        </Condition>
+        <Condition ID="CheckNoseGearDistance">
+            <input_port name="condition"/>
+            <input_port name="distance"/>
+        </Condition>
+        <Condition ID="CheckNoseGearShift">
+            <input_port name="condition"/>
+            <input_port name="threshold"/>
+        </Condition>
+        <Condition ID="CheckRunwayStart">
+            <output_port default="runway_start" name="output_key_name"/>
+        </Condition>
+        <Action ID="FinishAnimation">
+            <input_port name="member_name"/>
+        </Action>
+        <Action ID="GetConfigValue">
+            <input_port name="blackboard_key_name"/>
+            <input_port name="param_name"/>
+            <input_port default="float" name="param_type"/>
+        </Action>
+        <Action ID="MessageNode">
+            <input_port default="3" name="duration">message duration</input_port>
+            <input_port default="Message info" name="message">display message</input_port>
+        </Action>
+        <Action ID="Move">
+            <input_port name="member_name"/>
+            <output_port default="ready" name="output_key_name">{ready, in_progress}</output_port>
+            <input_port name="route_id"/>
+            <input_port default="normal" name="tail_point_mode">normal - tail point remains as is, hbb_mount_point - tail point moved to hbb_mount_point</input_port>
+            <input_port default="WAIT" name="wait_mode">{WAIT, NO_WAIT}</input_port>
+        </Action>
+        <Action ID="OverrideAnimation">
+            <input_port name="enabled"/>
+            <input_port name="member_name"/>
+            <input_port name="override_animation_name"/>
+        </Action>
+        <Action ID="Pause">
+            <input_port name="delay"/>
+            <input_port default="0" name="random_spread"/>
+        </Action>
+        <Action ID="PlayAnimation">
+            <input_port name="animation_name"/>
+            <input_port default="false" name="continue_previous_animation"/>
+            <input_port default="0" name="delay"/>
+            <input_port default="0" name="delay_spread"/>
+            <input_port name="member_name"/>
+            <input_port default="false" name="random_animation"/>
+            <input_port default="0" name="start_time_shift"/>
+            <input_port default="no_wait" name="wait_mode"/>
+        </Action>
+        <Action ID="ResetCrew"/>
+        <Action ID="ResetLA"/>
+        <Action ID="RotateOnAngle">
+            <input_port name="angleId"/>
+            <input_port name="member_name"/>
+        </Action>
+        <Action ID="SetAttachmentArgument">
+            <input_port name="argument_id"/>
+            <input_port name="argument_value"/>
+            <input_port name="attachment_name"/>
+            <input_port name="member_name"/>
+        </Action>
+        <Action ID="SetAttachmentArguments">
+            <input_port name="argument_ids"/>
+            <input_port name="argument_values"/>
+            <input_port name="attachment_names"/>
+            <input_port name="member_name"/>
+        </Action>
+        <SubTree ID="SetCrewIdle"/>
+        <Action ID="SetGCRequest">
+            <input_port name="attribute_name"/>
+            <input_port name="attribute_value"/>
+        </Action>
+        <Action ID="SetIdle">
+            <input_port name="member_name"/>
+        </Action>
+        <Action ID="ShowAircraftHBB">
+            <input_port default="true" name="flag"/>
+        </Action>
+        <Action ID="ShowAttachment">
+            <input_port name="attachment_name"/>
+            <input_port name="delay"/>
+            <input_port name="member_name"/>
+            <input_port name="visible"/>
+        </Action>        
+		<Action ID="ShowAttachments">
+            <input_port name="attachment_names"/>
+            <input_port name="delay"/>
+            <input_port name="member_name"/>
+            <input_port name="visible"/>
+        </Action>
+        <Action ID="ShowShipHBB">
+            <input_port name="flag"/>
+        </Action>
+        <SubTree ID="TeleportCrew"/>
+        <SubTree ID="SetNightModeAttachments"/>
+        <Action ID="TeleportMember">
+            <input_port name="member_name"/>
+        </Action>
+        <Condition ID="WaitAcInVolume"/>
+        <Condition ID="WaitAfterburner"/>
+    </TreeNodesModel>
+    <!-- ////////// -->
+</root>
+

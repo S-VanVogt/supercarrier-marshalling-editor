@@ -622,7 +622,44 @@ button:hover { background: #f1efe8; }
   margin: 8px 0;
 }
 
-/* SC-Configs folder button — needs attention state */
+/* Files tab */
+.files-status {
+  width: 100%;
+  font-size: 12px;
+  color: #1a1a18;
+}
+.files-head {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.files-head .hint { margin: 0; }
+.files-form-title {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+.files-note {
+  width: 100%;
+  font-size: 12px;
+  color: #8a5a00;
+  background: #fbf3df;
+  border: 0.5px solid #e0c98a;
+  border-radius: 8px;
+  padding: 5px 8px;
+}
+.panel-body code {
+  font-family: monospace;
+  font-size: 11px;
+  background: #f1efe8;
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+/* Config folder button — needs attention state */
 button.needs-attention {
   border: 1.5px dashed #c0392b;
   color: #c0392b;

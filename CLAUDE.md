@@ -26,6 +26,10 @@ Pure vanilla JS (ES modules), no build step, no framework. Canvas 2D rendering w
 - `js/lua-patcher.js` — RunwaysAndRoutes.lua import/export (preserves structure, strips block comments)
 - `js/crew-lua-patcher.js` — crew.lua export: patches edited member positions/headings, route positions/angles, and catapult crew routes back into original crew.lua text
 - `js/catapult-crew-data.js` — Catapult crew data model (4 cats × 6 members), phase definitions, Catmull-Rom tangent recalculation, memberLocalTs()
+- `js/config-store.js` — File System Access API wrapper for the config folder (root handle in IndexedDB, list/read/write/archive, create a config, file-exists checks)
+- `js/default-config.js` — `CONFIG_FILES` (the five file names), `DCS_SCRIPTS_PATH`, `fetchDefaultConfig()` for the built-in default set in `data/`
+- `js/package-builder.js` — Install package (OMM mod-pack zip) built in the browser, no library: `crc32`, `buildZip` (stored entries), `buildOmmPackage`, `downloadBytes`
+- `data/` — Built-in default config: the five files, a copy of `SC-Configs\sc-editor`
 - `js/polygon-data.js` — Carrier deck outline polygon
 - `assets/f14-folded.svg` — F-14 folded-wing silhouette (outline only) for route progress overlay
 - `js/polyline.js` — Polyline math: interpolated point at t (x, y, v), nearest point search
@@ -83,6 +87,36 @@ Pure vanilla JS (ES modules), no build step, no framework. Canvas 2D rendering w
   route -1 at early/mid progress; untagged trailing steps. Toxic: extra steps at
   duplicate trailing progress 1.0.
 
+## Configs and the built-in default set — v0.1.81–84
+
+A **config** is five files, all installed in `CoreMods/tech/USS_Nimitz/scripts`:
+`crew.lua`, `USS_Nimitz_RunwaysAndRoutes.lua`, `GroundCrew.lua`, `common.xml`, `common_disabled.xml`.
+
+- The editor **edits** crew.lua and the routes file, **repoints** `GroundCrew.lua` when a catapult
+  is disabled (`crew[N].behavior` → `common_disabled.xml`), and **carries the two XML files unchanged**.
+- `common_disabled.xml` is a VV file, not a DCS one: `common.xml` of VV_AdjAllcats + 24 lines
+  (GC_REQUEST_CREW_READY_TO_ASSIGN_PLANE=false, "Walk to safe" block).
+- **Built-in default set** = `data/` = copy of the `sc-editor` config in SC-Configs
+  (VV_AdjAllcats v1.4 + common_disabled.xml). To refresh it: update `SC-Configs\sc-editor`, copy its
+  five files into `data/`. The five files are stamped `initial v0.0` on purpose — a neutral name,
+  not the folder name and not VV_AdjAllcats: the stamp is what the canvas label and the Files tab
+  show, and what packages and saves made from the default are named after. The origin is kept in
+  the Notes line. The toolkit's Stamp action would write the folder name `sc-editor` back — do not
+  use it on that config. `app.js` fetches the set before building the UI; `UI.boot(defaultConfig)`
+  loads it through `_loadConfig()`. The data tables compiled into the JS modules (route-data.js,
+  crew-data.js, …) are only what shows if that fetch fails.
+- `UI._loadConfig(texts)` is the one routine for loading a whole config (startup, folder Load,
+  Import folder). A file the source lacks comes from the default set — never from the config loaded
+  before. Per-file import buttons stay partial on purpose (`_applyRoutesLua`, `_importCrewLua`).
+- `UI._buildConfigTexts(stamp)` builds the five texts from what is on screen (Save and packages).
+- **Save to a config folder** always writes the two Lua files and GroundCrew.lua; the two XML files
+  are only added when the folder lacks them, never overwritten (the user's own are hand-edited).
+- **New** saves what is on screen as a new subfolder (name `[A-Za-z0-9_-]+`, stamped with that name,
+  version v0.1). Plain Save still stamps the loaded config's name.
+- **Packages** (`SC-<name>_<version>.zip`, OMM mod-pack layout): "Build package" zips the SAVED
+  files of the selected config folder (all five must exist); "Download package" stamps and zips
+  what is on screen (any browser).
+
 ## Rendering Logic
 
 ### Crew Position Coloring (context-aware)
@@ -122,7 +156,7 @@ grid → polygon → deckMarkings → catapults → JBDs → unusedRoutePosition
 - **Routes panel** — 3-column grid: Takeoff Routes | Landing Routes | Points list. Each route column has "Show all" checkbox in header. Points column shows editable waypoints for selected route.
 - **Crew panel** — 2-column grid: Idle Positions (members) | Active Positions (routes). Each column has "Show all" checkbox. Crew names are clickable to select. T/L reference tags show which takeoff/landing tasks use each member/route.
 - **Catapult Crew panel** — Catapult selector (Cat1–4), phase selector (idle→occupy_cat), t slider. Shows catapult crew routes with waypoint editing.
-- **Import/Export panel** — Import/export buttons for RunwaysAndRoutes and crew.lua, with header comment fields.
+- **Files tab** — written for people who do not have the SC-Config toolkit. Status line (what is loaded) with the shared version/notes form; "Config folder" section (Chrome/Edge: Choose folder, config list, New / Load / Save / Build package); "File by file" section (any browser: Import folder, Download package, per-file import/export with header comment fields); a line saying where the files go in DCS.
 
 ## Canvas Interaction
 
@@ -160,8 +194,10 @@ grid → polygon → deckMarkings → catapults → JBDs → unusedRoutePosition
 - Export patches edited values back into original crew.lua text, preserving all other content
 
 ## Reference Files (not in repo)
-- `G:/OneDrive/ClaudeAI/DCS rr ref/crew.lua` — Source crew data
-- `G:/OneDrive/ClaudeAI/DCS rr ref/USS_Nimitz_RunwaysAndRoutes.lua` — Source route data
+- `G:/OneDrive/ClaudeAI/DCS rr ref/crew.lua` — Source of the crew tables compiled into the JS modules (VV "V1.2b NO Cat1", not stock)
+- `G:/OneDrive/ClaudeAI/DCS rr ref/USS_Nimitz_RunwaysAndRoutes.lua` — Source of the route tables compiled into the JS modules (VV "V1.2a", not stock)
+- `SC-Configs/sc-editor/` (the local SC-Configs folder) — Master copy of the built-in default set in `data/`
+- `SC-Configs/Original/` (same folder) — Stock DCS files (plus stamp lines)
 
 ## Backups
 - `polyline-app-backup-v4` — After crew active positions and task-based crew control

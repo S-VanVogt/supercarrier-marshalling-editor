@@ -47,13 +47,26 @@
   v0.1.80 — Crew moves on landing tasks: optional-progress steps (purple dashed boxes), +move/+prev buttons,
              import/export of untagged steps, duplicate-progress + duplicate-member validation (DCS skips
              the landing spot on duplicate progress — confirmed in-game 2026-06-10), clear tag via empty field
+  v0.1.81 — Built-in default config: five files in data/ (copy of the sc-editor config = VV_AdjAllcats v1.4
+             + common_disabled.xml) loaded at startup through the same routine as any config; a config that
+             lacks a file now gets the built-in copy instead of keeping the previously loaded config's file
+  v0.1.82 — Files tab reworded for people without the SC-Config toolkit: status line, "Config folder" and
+             "File by file" sections, where the files go in DCS
+  v0.1.83 — Config folder: New (save what is on screen as a new config), Save adds the files a folder lacks
+             and never overwrites an existing common.xml / common_disabled.xml
+  v0.1.84 — Install packages (OMM-compatible zip of the five files, built in the browser): Build package from
+             a saved config, Download package from what is on screen; note when a disabled cat needs the full set
+  v0.1.85 — Built-in default set stamped "VV_AdjAllcats v1.4" (was "sc-editor v1.0"), so the canvas label and
+             the Files tab show the config's real name and version
+  v0.1.86 — Built-in default set stamped "initial v0.0" instead: a neutral name, so packages and configs
+             made from it do not carry the VV_AdjAllcats name (the origin stays in the Notes line)
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.80</title>
+  <title>SuperCarrier Marshalling Editor v0.1.86</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -61,7 +74,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.80</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.86</h1>
       <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
     <canvas id="c" height="475"></canvas>
@@ -252,49 +265,82 @@
     </div>
   </div>
 
-  <!-- Config (combined I/O) -->
+  <!-- Files: what is loaded, and the two ways to load and save a config -->
   <div class="tab-pane" id="panel-config">
+    <!-- What the editor holds right now -->
     <div class="panel-body">
-      <div class="btn-row" style="align-items:center;gap:6px;flex-wrap:wrap">
-        <button id="btn-set-sc-folder" title="Select SC-Configs root folder">📂 SC-Configs</button>
-        <span id="sc-folder-label" class="hint" style="margin:0;font-size:11px;color:#888">No folder set</span>
-        <select id="sc-config-select" style="font-size:12px;padding:3px 6px;border:0.5px solid #b4b2a9;border-radius:6px;min-width:180px" disabled>
-          <option value="">— select config —</option>
-        </select>
-        <button id="btn-load-config" disabled>Load</button>
-        <button id="btn-save-config" disabled>Save</button>
-      </div>
-    </div>
-    <div class="config-separator"></div>
-    <div class="panel-body">
-      <div class="btn-row" style="align-items:center">
-        <button id="btn-import-config">Import Config</button>
-        <button id="btn-export-config">Export Config</button>
-        <span class="hint" style="margin:0">Folder picker fallback (no direct save).</span>
-      </div>
-      <div id="export-stamp-form" style="display:none;width:100%;margin-top:6px;padding:8px;background:#f5f4f0;border-radius:8px;border:0.5px solid #b4b2a9">
-        <div style="display:flex;gap:8px;align-items:center">
+      <div class="files-status" id="config-status"></div>
+      <!-- Version / notes form shared by Save, New and Download package -->
+      <div id="export-stamp-form" style="display:none;width:100%;padding:8px;background:#f5f4f0;border-radius:8px;border:0.5px solid #b4b2a9">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="files-form-title" id="export-stamp-title"></span>
+          <span id="export-stamp-name-group" style="display:none">
+            <label style="font-size:12px;font-weight:600;white-space:nowrap">Name</label>
+            <input type="text" id="export-stamp-name" placeholder="MyConfig" style="width:150px;font-size:12px;padding:3px 6px;border:0.5px solid #b4b2a9;border-radius:6px;outline:none">
+          </span>
           <label style="font-size:12px;font-weight:600;white-space:nowrap">Version</label>
           <input type="text" id="export-stamp-ver" style="width:80px;font-size:12px;padding:3px 6px;border:0.5px solid #b4b2a9;border-radius:6px;outline:none">
           <label style="font-size:12px;font-weight:600;white-space:nowrap">Notes</label>
-          <input type="text" id="export-stamp-notes" style="flex:1;font-size:12px;padding:3px 6px;border:0.5px solid #b4b2a9;border-radius:6px;outline:none">
+          <input type="text" id="export-stamp-notes" style="flex:1;min-width:160px;font-size:12px;padding:3px 6px;border:0.5px solid #b4b2a9;border-radius:6px;outline:none">
           <button id="btn-export-stamp-apply">Save</button>
           <button id="btn-export-stamp-cancel" style="background:#e8e6e0">Cancel</button>
         </div>
       </div>
     </div>
     <div class="config-separator"></div>
+
+    <!-- Config folder: saves straight to disk (File System Access API) -->
     <div class="panel-body">
-      <div class="btn-row">
+      <div class="files-head">
+        <span class="col-title">Config folder</span>
+        <span class="hint">Chrome or Edge. Saves straight to your disk, one subfolder per config.</span>
+      </div>
+      <div class="btn-row" style="align-items:center;gap:6px;flex-wrap:wrap">
+        <button id="btn-set-sc-folder" title="Choose the folder that holds your configs, one subfolder per config. An empty folder is fine.">Choose folder</button>
+        <span id="sc-folder-label" class="hint" style="margin:0;font-size:11px;color:#888">No folder chosen</span>
+      </div>
+      <div class="btn-row" style="align-items:center;gap:6px;flex-wrap:wrap">
+        <select id="sc-config-select" style="font-size:12px;padding:3px 6px;border:0.5px solid #b4b2a9;border-radius:6px;min-width:180px" disabled>
+          <option value="">— select config —</option>
+        </select>
+        <button id="btn-new-config" disabled title="Save what is on screen as a new config in this folder">New</button>
+        <button id="btn-load-config" disabled title="Load the selected config">Load</button>
+        <button id="btn-save-config" disabled title="Save what is on screen into the selected config. Files the folder lacks are added.">Save</button>
+        <button id="btn-build-package" disabled title="Build an install package (zip) from the saved files of the selected config">Build package</button>
+      </div>
+    </div>
+    <div class="config-separator"></div>
+
+    <!-- File by file: plain file pickers and downloads, any browser -->
+    <div class="panel-body">
+      <div class="files-head">
+        <span class="col-title">File by file</span>
+        <span class="hint">Any browser. Nothing is kept until you export or download.</span>
+      </div>
+      <div class="btn-row" style="align-items:center;flex-wrap:wrap">
+        <button id="btn-import-config" title="Load a config from a folder on your disk. It is read only: use the buttons on the right to get your work out.">Import folder</button>
+        <button id="btn-export-config" title="Download what is on screen as one install package (zip) holding all five files">Download package</button>
+      </div>
+      <div class="btn-row" style="flex-wrap:wrap">
         <button id="btn-import-lua">Import RunwaysAndRoutes</button>
         <button id="btn-import-crew">Import crew.lua</button>
         <button id="btn-export-lua">Export RunwaysAndRoutes</button>
-        <button id="btn-export-crew">Export Crew</button>
+        <button id="btn-export-crew">Export crew.lua</button>
       </div>
       <div class="btn-row" style="margin-top:4px">
         <input type="text" id="lua-header-comment" placeholder="Header comment for exported RR lua" style="flex:1;min-width:160px;font-size:12px;padding:4px 8px;border:0.5px solid #b4b2a9;border-radius:8px;outline:none">
         <input type="text" id="crew-header-comment" placeholder="Header comment for exported crew lua" style="flex:1;min-width:160px;font-size:12px;padding:4px 8px;border:0.5px solid #b4b2a9;border-radius:8px;outline:none">
       </div>
+      <div class="files-note" id="files-disable-note" style="display:none"></div>
+    </div>
+    <div class="config-separator"></div>
+
+    <!-- Where the files go -->
+    <div class="panel-body">
+      <span class="hint" style="margin:0">
+        A config is five files: <code>crew.lua</code>, <code>USS_Nimitz_RunwaysAndRoutes.lua</code>, <code>GroundCrew.lua</code>, <code>common.xml</code> and <code>common_disabled.xml</code>.
+        In DCS they go in <code>CoreMods\tech\USS_Nimitz\scripts</code>. A package installs with Open Mod Manager, or by hand: back up the originals first, since a DCS update or repair puts them back.
+      </span>
     </div>
   </div>
   </div><!-- .panels-scroll -->
