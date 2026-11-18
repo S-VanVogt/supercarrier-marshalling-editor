@@ -3,6 +3,15 @@
  * point list, slider, import/export, route panels, and canvas interactions.
  */
 import { polylinePoint, segmentLengths } from './polyline.js';
+
+/** Task step order = export order: tagged steps ascending by progress,
+ *  untagged crew-move steps (progress null) after them, stable. */
+function taskStepCmp(a, b) {
+  if (a.progress == null && b.progress == null) return 0;
+  if (a.progress == null) return 1;
+  if (b.progress == null) return -1;
+  return a.progress - b.progress;
+}
 import { CATAPULT_COLORS, CAT_TAIL_POINTS, LANDING_COLOR } from './route-data.js';
 import { CREW_MEMBERS, LIVERY_COLOURS } from './crew-data.js';
 import { downloadPatchedLua, buildPatchedLua, parseTakeoffRoutes, parseLandingRoutes, parseElevators, patchElevators, parseBlockerTerminals, patchBlockerTerminals } from './lua-patcher.js';
@@ -14,7 +23,7 @@ import { patchCrewLua, downloadPatchedCrewLua, buildPatchedCrewLua } from './cre
 import { parseCatapultCrew } from './crew-lua-parser.js';
 import { CATAPULT_CREWS, CATAPULT_MEMBER_COLORS, CATAPULT_PHASES, findPhaseRoute, memberLocalTs, interpolateByArcLength, replaceCatapultCrews } from './catapult-crew-data.js';
 import { DEFAULT_CATAPULT_CREWS } from './catapult-crew-defaults.js';
-import { validateTakeoffTasks } from './takeoff-validation.js';
+import { validateTakeoffTasks, validateParkingTasks } from './takeoff-validation.js';
 import * as CS from './config-store.js';
 import { pointOnDeck } from './polygon-data.js';
 import { heightForPos } from './route-state.js';
@@ -220,6 +229,8 @@ export class UI {
 
     // Add/Delete/Reset step buttons
     document.getElementById('btn-task-add').addEventListener('click', () => this._addTaskStep());
+    document.getElementById('btn-task-add-move').addEventListener('click', () => this._addCrewMove(false));
+    document.getElementById('btn-task-add-prev').addEventListener('click', () => this._addCrewMove(true));
     document.getElementById('btn-task-delete').addEventListener('click', () => this._deleteTaskStep());
     document.getElementById('btn-task-reset').addEventListener('click', () => this._resetTaskStep());
     // Sync all catcrew endpoints button
@@ -265,9 +276,10 @@ export class UI {
       const task = this._currentTask();
       if (task && task.steps[this._dragStepIdx]) {
         const draggedStep = task.steps[this._dragStepIdx];
+        // Dragging an untagged crew-move step assigns it a progress (tags it)
         draggedStep.progress = Math.round(progress * 1000) / 1000;
-        // Re-sort steps by progress to keep _controllingStep correct
-        task.steps.sort((a, b) => a.progress - b.progress);
+        // Re-sort steps (tagged by progress, untagged trailing) to keep _controllingStep correct
+        task.steps.sort(taskStepCmp);
         // Update drag index to follow the step's new position
         this._dragStepIdx = task.steps.indexOf(draggedStep);
         this._selectedHandoff = this._dragStepIdx;
@@ -1192,7 +1204,8 @@ export class UI {
     this._syncTakeoffValidationWarning();
     this._syncCatCrewCanvasWarning();
 
-    console.log(`Imported crew.lua: ${data.members.length} members, ${data.routes.length} routes, ${data.takeoffTasks.length} takeoff tasks, ${data.parkingTasks.length} parking tasks`);
+    const crewMoves = data.parkingTasks.reduce((n, t) => n + t.steps.filter(s => s.progress == null).length, 0);
+    console.log(`Imported crew.lua: ${data.members.length} members, ${data.routes.length} routes, ${data.takeoffTasks.length} takeoff tasks, ${data.parkingTasks.length} parking tasks${crewMoves ? ` (${crewMoves} untagged crew moves)` : ''}`);
   }
 
   _switchRouteCatapult(routeIdx, newCat) {
@@ -1458,6 +1471,22 @@ export class UI {
     const delBtn = document.getElementById('btn-task-delete');
     const resetBtn = document.getElementById('btn-task-reset');
     actionGroup.classList.toggle('visible', !!showContent);
+    // Crew-move buttons: landing/parking tasks only (untagged steps untested for takeoff)
+    const moveBtn = document.getElementById('btn-task-add-move');
+    const prevBtn = document.getElementById('btn-task-add-prev');
+    const isLanding = this.rs.selectedRouteType === 'landing';
+    moveBtn.style.display = isLanding ? '' : 'none';
+    prevBtn.style.display = isLanding ? '' : 'none';
+    if (isLanding && task) {
+      const prevStep = this._prevTaskFinalStep();
+      const used = new Set(task.steps.map(s => s.memberId));
+      prevBtn.disabled = !prevStep || used.has(prevStep.memberId);
+      prevBtn.title = prevStep
+        ? (used.has(prevStep.memberId)
+            ? `Previous task's final member ${prevStep.memberId} already used in this task`
+            : `Add crew move: return previous landing task's final member (${prevStep.memberId}) to idle`)
+        : 'No previous landing task';
+    }
     if (showContent) {
       const hasSelection = this._selectedHandoff >= 0 && task.steps && this._selectedHandoff < task.steps.length;
       delBtn.disabled = !hasSelection;
@@ -1479,13 +1508,23 @@ export class UI {
     track.innerHTML = '';
     const steps = task.steps || [];
 
-    // Compute positions, nudge overlapping boxes
+    // Compute positions, nudge overlapping boxes.
+    // Untagged crew-move steps (progress null) pin to the right end of the track.
     const boxW = 20;
-    const positions = steps.map(s => s.progress);
+    const positions = steps.map(s => (s.progress == null ? 1 : s.progress));
     // Add brown at position 0 for takeoff nudge calculation
     const hasBrown = isTakeoff && task.brownId != null;
     if (hasBrown) positions.unshift(0);
     const nudged = this._nudgePositions(positions, boxW, track);
+
+    // Parking validation issues for the CURRENT task (box-level styling)
+    let invalidSteps = new Map();
+    if (!isTakeoff) {
+      const { errors } = validateParkingTasks([task], CREW_MEMBERS.length, CREW_ROUTES.length);
+      for (const err of errors) {
+        invalidSteps.set(err.stepIdx, (invalidSteps.get(err.stepIdx) ? invalidSteps.get(err.stepIdx) + ' | ' : '') + err.message);
+      }
+    }
 
     // Place brown box at position 0 inside track
     if (hasBrown) {
@@ -1517,11 +1556,19 @@ export class UI {
       box.dataset.stepIdx = si;
       if (si === this._selectedHandoff) box.classList.add('selected');
       if (this._assignMode && !this._assignIsBrown && this._assignStepIdx === si) box.classList.add('assigning');
+      if (step.progress == null) {
+        box.classList.add('untagged');
+        box.title = 'Crew move — no progress tag. Exports after tagged steps; drag or type a value to tag it.';
+      }
       if (isTakeoff && (step.routeId === -1 || step.routeId === 0)) {
         box.classList.add('invalid');
         box.title = step.routeId === 0
           ? 'route_id = 0 (Lua 1-based: routes[0] = nil, will crash DCS)'
           : 'route_id = -1 not allowed in takeoff tasks';
+      }
+      if (!isTakeoff && invalidSteps.has(si)) {
+        box.classList.add('invalid');
+        box.title = invalidSteps.get(si);
       }
 
       // Click to select + drag
@@ -1549,18 +1596,33 @@ export class UI {
     valSpan.innerHTML = '';
     const hasSelection = this._selectedHandoff >= 0 && this._selectedHandoff < steps.length;
     const step = hasSelection ? steps[this._selectedHandoff] : null;
+    const isUntagged = !!step && step.progress == null;
     const increment = 0.005;
 
     const input = document.createElement('input');
     input.type = 'text';
-    input.value = step ? step.progress.toFixed(3) : '--';
+    input.value = step ? (isUntagged ? '' : step.progress.toFixed(3)) : '--';
+    if (isUntagged) input.placeholder = 'no tag';
     input.disabled = !step;
     if (step) {
       input.addEventListener('change', () => {
-        const v = parseFloat(input.value);
+        const raw = input.value.trim();
+        // Empty value on a landing task clears the tag (untagged crew move)
+        if (raw === '' && this.rs.selectedRouteType === 'landing') {
+          this.rs.pushUndo();
+          step.progress = null;
+          steps.sort(taskStepCmp);
+          this._selectedHandoff = steps.indexOf(step);
+          this._syncTaskRow();
+          this._update();
+          return;
+        }
+        const v = parseFloat(raw);
         if (!isNaN(v) && v >= 0 && v <= 1) {
           this.rs.pushUndo();
           step.progress = v;
+          steps.sort(taskStepCmp);
+          this._selectedHandoff = steps.indexOf(step);
           this._syncTaskRow();
           this._update();
         }
@@ -1570,11 +1632,13 @@ export class UI {
     const upBtn = document.createElement('button');
     upBtn.className = 'task-spinner-btn';
     upBtn.textContent = '\u25B2';
-    upBtn.disabled = !step;
-    if (step) {
+    upBtn.disabled = !step || isUntagged;
+    if (step && !isUntagged) {
       upBtn.addEventListener('click', () => {
         this.rs.pushUndo();
         step.progress = Math.min(1, Math.round((step.progress + increment) * 1000) / 1000);
+        steps.sort(taskStepCmp);
+        this._selectedHandoff = steps.indexOf(step);
         this._syncTaskRow();
         this._update();
       });
@@ -1583,11 +1647,13 @@ export class UI {
     const downBtn = document.createElement('button');
     downBtn.className = 'task-spinner-btn';
     downBtn.textContent = '\u25BC';
-    downBtn.disabled = !step;
-    if (step) {
+    downBtn.disabled = !step || isUntagged;
+    if (step && !isUntagged) {
       downBtn.addEventListener('click', () => {
         this.rs.pushUndo();
         step.progress = Math.max(0, Math.round((step.progress - increment) * 1000) / 1000);
+        steps.sort(taskStepCmp);
+        this._selectedHandoff = steps.indexOf(step);
         this._syncTaskRow();
         this._update();
       });
@@ -1705,10 +1771,12 @@ export class UI {
     const steps = task.steps;
 
     // Place new step at midpoint of largest gap, or at 0.5 if empty
+    // (untagged crew-move steps have no progress and are excluded from the gap search)
     let newProgress = 0.5;
-    if (steps.length > 0) {
+    const tagged = steps.map(s => s.progress).filter(p => p != null);
+    if (tagged.length > 0) {
       // Find largest gap between existing steps (including 0 and 1 boundaries)
-      const sorted = steps.map(s => s.progress).sort((a, b) => a - b);
+      const sorted = tagged.sort((a, b) => a - b);
       const boundaries = [0, ...sorted, 1];
       let bestGap = 0, bestMid = 0.5;
       for (let i = 1; i < boundaries.length; i++) {
@@ -1722,11 +1790,58 @@ export class UI {
     const isTakeoff = this.rs.selectedRouteType === 'takeoff';
     const newStep = { progress: newProgress, memberId: 0, routeId: isTakeoff ? 1 : -1 };
     steps.push(newStep);
-    // Keep steps sorted by progress
-    steps.sort((a, b) => a.progress - b.progress);
+    // Keep steps sorted (tagged by progress, untagged trailing)
+    steps.sort(taskStepCmp);
 
     // Select the new step
     this._selectedHandoff = steps.indexOf(newStep);
+    this._rebuildCrewLists();
+    this._syncTaskRow();
+    this._update();
+  }
+
+  /** Final step of the previous landing task (lower slot fills first), or null. */
+  _prevTaskFinalStep() {
+    const rs = this.rs;
+    if (rs.selectedRouteType !== 'landing' || rs.selectedRoute < 1) return null;
+    const prev = PARKING_TASKS[rs.selectedRoute - 1];
+    if (!prev || !prev.steps || prev.steps.length === 0) return null;
+    // "Final" = last TAGGED step (the parking director), not a trailing crew move
+    for (let i = prev.steps.length - 1; i >= 0; i--) {
+      if (prev.steps[i].progress != null) return prev.steps[i];
+    }
+    return null;
+  }
+
+  /**
+   * Add an untagged "crew move" step to the selected landing task: a member is
+   * sent to a destination (route, or -1 = idle) when the task runs, with no
+   * progress tag — exports after the tagged steps.
+   * @param {boolean} fromPrev  prefill with the previous task's final member
+   */
+  _addCrewMove(fromPrev) {
+    const task = this._currentTask();
+    if (!task || this.rs.selectedRouteType !== 'landing') return;
+
+    const used = new Set(task.steps.map(s => s.memberId));
+    let memberId = -1;
+    if (fromPrev) {
+      const prevStep = this._prevTaskFinalStep();
+      if (!prevStep || used.has(prevStep.memberId)) return;
+      memberId = prevStep.memberId;
+    } else {
+      // First member not already used in this task
+      for (let i = 0; i < CREW_MEMBERS.length; i++) {
+        if (!used.has(i)) { memberId = i; break; }
+      }
+      if (memberId < 0) return;
+    }
+
+    this.rs.pushUndo();
+    const newStep = { progress: null, memberId, routeId: -1 };
+    task.steps.push(newStep);
+    task.steps.sort(taskStepCmp);
+    this._selectedHandoff = task.steps.indexOf(newStep);
     this._rebuildCrewLists();
     this._syncTaskRow();
     this._update();
@@ -1761,10 +1876,14 @@ export class UI {
 
   _confirmTakeoffValidation() {
     const { errors, warnings } = validateTakeoffTasks(TAKEOFF_TASKS, PARKING_TASKS);
-    if (errors.length === 0 && warnings.length === 0) return true;
+    const pk = validateParkingTasks(PARKING_TASKS, CREW_MEMBERS.length, CREW_ROUTES.length);
+    if (errors.length === 0 && warnings.length === 0 && pk.errors.length === 0) return true;
     let msg = '';
     if (errors.length > 0) {
       msg += 'ERRORS (will crash DCS):\n' + errors.map(e => `  Task ${e.taskIdx + 1}: ${e.message}`).join('\n') + '\n\n';
+    }
+    if (pk.errors.length > 0) {
+      msg += 'LANDING TASK ERRORS (DCS will skip the spot):\n' + pk.errors.map(e => `  Landing ${e.taskIdx + 1}: ${e.message}`).join('\n') + '\n\n';
     }
     if (warnings.length > 0) {
       msg += 'WARNINGS:\n' + warnings.map(w => `  ${w.message}`).join('\n') + '\n\n';
@@ -1774,11 +1893,16 @@ export class UI {
 
   _syncTakeoffValidationWarning() {
     const { errors, warnings } = validateTakeoffTasks(TAKEOFF_TASKS, PARKING_TASKS);
-    if (errors.length === 0 && warnings.length === 0) {
+    const pk = validateParkingTasks(PARKING_TASKS, CREW_MEMBERS.length, CREW_ROUTES.length);
+    const allErrors = [
+      ...errors.map(e => `Task ${e.taskIdx + 1}: ${e.message}`),
+      ...pk.errors.map(e => `Landing ${e.taskIdx + 1}: ${e.message}`),
+    ];
+    if (allErrors.length === 0 && warnings.length === 0) {
       this.renderer.validationWarning = null;
       this.renderer.validationWarningLevel = null;
-    } else if (errors.length > 0) {
-      this.renderer.validationWarning = '\u26A0 ' + errors.map(e => `Task ${e.taskIdx + 1}: ${e.message}`).join('  |  ');
+    } else if (allErrors.length > 0) {
+      this.renderer.validationWarning = '\u26A0 ' + allErrors.join('  |  ');
       this.renderer.validationWarningLevel = 'error';
     } else {
       this.renderer.validationWarning = '\u26A0 ' + warnings.map(w => w.message).join('  |  ');

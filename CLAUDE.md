@@ -64,6 +64,25 @@ Pure vanilla JS (ES modules), no build step, no framework. Canvas 2D rendering w
 - `route_id = -1` means member returns to idle position
 - Used to map "unused by takeoff" routes to their members
 
+### Crew moves (untagged parking steps) — v0.1.80
+- A parking step's `progress` is OPTIONAL. A step without it is a "crew move":
+  the member goes to the destination (route, or -1 = idle) when the task runs.
+  Use case: return the previous landing spot's final PD to idle.
+- Model/parser keep `progress: null`; export omits the `["progress"]` key entirely.
+- Order = export order: tagged steps sorted ascending by progress, untagged after.
+- UI: purple dashed boxes pinned at the right end of the handoff track. `+move`
+  adds one (first member not in the task, route -1); `+prev` prefills the previous
+  landing task's final member. Right-click assign works as usual. Typing a progress
+  value tags the step; clearing the field untags it. Dragging an untagged box tags it.
+- VALIDATION (errors, block-export gate + red boxes), in-game confirmed 2026-06-10:
+  - duplicate progress value within one task → **DCS skips that landing terminal
+    entirely** (planes leapfrog the spot; nc1-1Rowpark_3b v1.4→v1.5 A/B)
+  - same member twice in one task
+  - member_id / route_id out of range
+- Engine-proven safe shapes: single final step at progress 1.0 (even route -1);
+  route -1 at early/mid progress; untagged trailing steps. Toxic: extra steps at
+  duplicate trailing progress 1.0.
+
 ## Rendering Logic
 
 ### Crew Position Coloring (context-aware)
@@ -86,7 +105,9 @@ Pure vanilla JS (ES modules), no build step, no framework. Canvas 2D rendering w
 grid → polygon → deckMarkings → catapults → JBDs → unusedRoutePositions → crewActivePositions → crew → takeoffRoutes → landingRoutes → activeCrewLines
 
 ### Coordinate System
-- x = along deck (negative = bow/front, positive = stern/back)
+- x = along deck. **WORLD frame (corrected 2026-06-10): POSITIVE x = bow** (Point/1Row at
+  x≈+53..159), negative x = stern (Patio at x≈-115..-141, island cutout x≈-37..-75).
+  The previous "negative = bow" note here was wrong in world terms.
 - y = across deck
 - In RunwaysAndRoutes.lua points: `{{x, deckHeight, z}, v}` where x→viewport X, z→viewport Y, deckHeight(20.1494) ignored
 

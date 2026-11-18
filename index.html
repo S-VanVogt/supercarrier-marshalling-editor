@@ -44,13 +44,16 @@
   v0.1.76 — Show catapult crew selected vertex x/y/heading in coordout box
   v0.1.77 — Wider cat crew Route t slider, banner slider drives cat crew t when Catapult Crew tab active
   v0.1.79 — Cat crew phase endpoint sync: drag auto-updates adjacent phase, Sync Endpoints button for bulk fix
+  v0.1.80 — Crew moves on landing tasks: optional-progress steps (purple dashed boxes), +move/+prev buttons,
+             import/export of untagged steps, duplicate-progress + duplicate-member validation (DCS skips
+             the landing spot on duplicate progress — confirmed in-game 2026-06-10), clear tag via empty field
 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SuperCarrier Marshalling Editor v0.1.79</title>
+  <title>SuperCarrier Marshalling Editor v0.1.80</title>
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -58,7 +61,7 @@
   <!-- Fixed top: canvas + controls -->
   <div class="canvas-banner">
     <div class="banner-header">
-      <h1>SuperCarrier Marshalling Editor v0.1.79</h1>
+      <h1>SuperCarrier Marshalling Editor v0.1.80</h1>
       <span class="hint">Scroll to zoom. Left-click to pan empty space. Right-click to add/insert waypoints when editing a route.</span>
     </div>
     <canvas id="c" height="475"></canvas>
@@ -85,6 +88,8 @@
           <span class="task-handoff-val" id="task-handoff-val"></span>
           <span class="task-action-group" id="task-action-group">
             <button class="task-action-btn" id="btn-task-add" title="Add step">add</button>
+            <button class="task-action-btn" id="btn-task-add-move" title="Add crew move (no progress tag): send a member to a destination when this landing task runs. Right-click the new box to assign member/destination.">+move</button>
+            <button class="task-action-btn" id="btn-task-add-prev" title="Add crew move returning the previous landing task's final member to idle">+prev</button>
             <button class="task-action-btn" id="btn-task-delete" title="Delete selected step">del</button>
             <button class="task-action-btn" id="btn-task-reset" title="Reset selected step to member 0, route -1">reset</button>
           </span>

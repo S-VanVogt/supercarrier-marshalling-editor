@@ -368,6 +368,22 @@ button:hover { background: #f1efe8; }
 .task-crew-box.assigning::before {
   background: #E07030;
 }
+.task-crew-box.untagged {
+  border-style: dashed;
+  border-color: #7a5fb5;
+  box-shadow: 0 0 0 1px rgba(122,95,181,0.35);
+}
+.task-crew-box.untagged::before {
+  background: #7a5fb5;
+}
+.task-crew-box.untagged .crew-route-half {
+  background: #e8e2f5;
+  color: #4a3a75;
+}
+.task-crew-box.untagged.selected {
+  border-color: #3080E0;
+  box-shadow: 0 0 0 1px #3080E0;
+}
 .task-crew-box.invalid {
   border-color: #c0392b;
   box-shadow: 0 0 0 1px #c0392b;

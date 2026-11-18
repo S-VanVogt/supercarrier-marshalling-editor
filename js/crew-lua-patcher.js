@@ -610,7 +610,10 @@ function buildParkingTaskInner(task, routeLabel) {
   for (let i = 0; i < task.steps.length; i++) {
     const s = task.steps[i];
     lines.push(`${indent}[${i + 1}] = {`);
-    lines.push(`${indent}    ["progress"] = ${s.progress},`);
+    // Crew-move steps have no progress tag — omit the key entirely (DCS accepts it).
+    if (s.progress != null) {
+      lines.push(`${indent}    ["progress"] = ${s.progress},`);
+    }
     lines.push(`${indent}    ["member_id"] = ${s.memberId},`);
     lines.push(`${indent}    ["route_id"] = ${s.routeId},`);
     lines.push(`${indent}},`);

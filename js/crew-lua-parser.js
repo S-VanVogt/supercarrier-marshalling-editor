@@ -243,6 +243,11 @@ function parseTakeoffTasks(section) {
  * Parse ["parking_tasks"] = { ... } section.
  * Returns array of task objects with { steps: [{ progress, memberId, routeId }] }.
  * (parking_tasks have no brown_id/brown_route_id at the start — brown is at the end)
+ *
+ * progress is OPTIONAL on a step ("crew move" steps, e.g. send a previous spot's
+ * PD back to idle): missing progress is kept as progress = null. Tagged steps are
+ * sorted ascending by progress; untagged (null) steps keep file order after them —
+ * matching the export layout in crew-lua-patcher.js.
  */
 function parseParkingTasks(section) {
   const tasksBlock = extractSection(section, '["parking_tasks"]');
@@ -263,12 +268,18 @@ function parseParkingTasks(section) {
       const memberId = extractNumber(stepBlock, '["member_id"]');
       const routeId = extractNumber(stepBlock, '["route_id"]');
 
-      if (progress !== null && memberId !== null && routeId !== null) {
+      if (memberId !== null && routeId !== null) {
         steps.push({ progress, memberId, routeId });
       }
     }
 
-    steps.sort((a, b) => a.progress - b.progress);
+    // Tagged steps ascending; untagged (progress null) after them, stable.
+    steps.sort((a, b) => {
+      if (a.progress == null && b.progress == null) return 0;
+      if (a.progress == null) return 1;
+      if (b.progress == null) return -1;
+      return a.progress - b.progress;
+    });
     if (steps.length > 0) {
       tasks.push({ steps });
     }

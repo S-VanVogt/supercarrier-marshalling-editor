@@ -1326,13 +1326,17 @@ export class Renderer {
   }
 
   /** Find controlling step index for parking task at progress t.
-   *  Returns step index (0-based), or -1 if past all steps (last step still controls). */
+   *  Returns step index (0-based), or -1 if past all steps (last step still controls).
+   *  Steps without a progress tag (crew moves) never control — skipped here. */
   _parkingControllingStep(task, t) {
+    let lastTagged = null;
     for (let i = 0; i < task.steps.length; i++) {
+      if (task.steps[i].progress == null) continue;
       if (t < task.steps[i].progress) return i;
+      lastTagged = i;
     }
-    // Past last step → last step still controls
-    return task.steps.length > 0 ? task.steps.length - 1 : null;
+    // Past last tagged step → last tagged step still controls
+    return lastTagged;
   }
 
   drawActiveParkingCrewLines(rs) {
@@ -1359,8 +1363,10 @@ export class Renderer {
         const step = task.steps[i];
         const target = this._parkingTarget(step);
         if (!target) continue;
-        // Initial position: where this step receives control
-        const initT = (i === 0) ? 0 : task.steps[i - 1].progress;
+        // Initial position: where this step receives control.
+        // Untagged crew-move steps (and steps after them) anchor at route end.
+        let initT = (i === 0) ? 0 : task.steps[i - 1].progress;
+        if (step.progress == null || initT == null) initT = 1;
         const handoffPt = polylinePoint(route.points, initT);
         if (!handoffPt) continue;
         const hc = this.wc(handoffPt.x, handoffPt.y);

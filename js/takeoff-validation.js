@@ -58,3 +58,60 @@ export function validateTakeoffTasks(tasks, parkingTasks) {
 
   return { errors, warnings };
 }
+
+/**
+ * Validate parking (landing) tasks.
+ *
+ * Error rules (in-game confirmed 2026-06-10, nc1-1Rowpark_3b v1.4→v1.5 A/B):
+ *  - Duplicate progress value within one task — DCS skips that task's landing
+ *    TERMINAL entirely (planes leapfrog the spot). Steps without a progress tag
+ *    ("crew moves") are exempt — only tagged values must be unique.
+ *  - Same member referenced twice in one task.
+ *  - member_id / route_id out of range (route_id -1 = idle is valid).
+ */
+export function validateParkingTasks(parkingTasks, memberCount, routeCount) {
+  const errors = [];
+  for (let ti = 0; ti < (parkingTasks || []).length; ti++) {
+    const steps = parkingTasks[ti].steps || [];
+
+    const seenProgress = new Map();
+    const seenMembers = new Map();
+    for (let si = 0; si < steps.length; si++) {
+      const s = steps[si];
+
+      if (s.progress != null) {
+        if (seenProgress.has(s.progress)) {
+          errors.push({
+            taskIdx: ti, stepIdx: si, field: 'progress', value: s.progress,
+            message: `duplicate progress ${s.progress} (steps ${seenProgress.get(s.progress) + 1} and ${si + 1}) — DCS will skip this landing spot`,
+          });
+        } else {
+          seenProgress.set(s.progress, si);
+        }
+      }
+
+      if (seenMembers.has(s.memberId)) {
+        errors.push({
+          taskIdx: ti, stepIdx: si, field: 'memberId', value: s.memberId,
+          message: `member ${s.memberId} used twice (steps ${seenMembers.get(s.memberId) + 1} and ${si + 1})`,
+        });
+      } else {
+        seenMembers.set(s.memberId, si);
+      }
+
+      if (memberCount != null && (s.memberId < 0 || s.memberId >= memberCount)) {
+        errors.push({
+          taskIdx: ti, stepIdx: si, field: 'memberId', value: s.memberId,
+          message: `member_id ${s.memberId} out of range (0–${memberCount - 1})`,
+        });
+      }
+      if (routeCount != null && (s.routeId < -1 || s.routeId >= routeCount)) {
+        errors.push({
+          taskIdx: ti, stepIdx: si, field: 'routeId', value: s.routeId,
+          message: `route_id ${s.routeId} out of range (-1 or 0–${routeCount - 1})`,
+        });
+      }
+    }
+  }
+  return { errors };
+}
